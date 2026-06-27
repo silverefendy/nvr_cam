@@ -1,0 +1,17 @@
+[Unit]
+Description=CCTV NVR — AV1 Idle Encoder
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+WorkingDirectory=/opt/cctv
+EnvironmentFile=/opt/cctv/.env
+ExecStart=/opt/cctv/venv/bin/python -m backend.services.encoder.av1_encoder
+Restart=always
+RestartSec=60
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

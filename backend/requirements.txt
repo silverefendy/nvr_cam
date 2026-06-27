@@ -1,0 +1,34 @@
+# Web framework
+fastapi==0.115.0
+uvicorn[standard]==0.30.0
+
+# Database
+sqlalchemy[asyncio]==2.0.35
+asyncpg==0.29.0
+alembic==1.13.3
+
+# Auth & security
+pyjwt==2.9.0
+bcrypt==4.2.0
+python-multipart==0.0.12
+
+# Config
+pydantic-settings==2.5.2
+python-dotenv==1.0.1
+pyyaml==6.0.2
+
+# Video & AI
+opencv-python-headless==4.10.0.84
+numpy==1.26.4
+
+# Notifications
+aiohttp==3.10.0
+
+# Utilities
+psutil==6.0.0
+schedule==1.2.2
+
+# Dev / testing
+pytest==8.3.0
+pytest-asyncio==0.24.0
+httpx==0.27.0

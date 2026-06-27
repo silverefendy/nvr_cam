@@ -1,0 +1,24 @@
+# Mapping kamera ke drive
+# Sesuaikan dengan konfigurasi HDD di server
+
+drives:
+  - path: "/mnt/driveE"
+    cameras: ["cam_01", "cam_02", "cam_03"]
+  - path: "/mnt/driveF"
+    cameras: ["cam_04", "cam_05", "cam_06"]
+  - path: "/mnt/driveG"
+    cameras: ["cam_07", "cam_08", "cam_09"]
+  - path: "/mnt/driveH"
+    cameras: ["cam_10", "cam_11", "cam_12"]
+  - path: "/mnt/driveI"
+    cameras: ["cam_13", "cam_14", "cam_15"]
+  - path: "/mnt/driveJ"
+    cameras: ["cam_16", "cam_17", "cam_18"]
+  - path: "/mnt/driveK"
+    cameras: ["cam_19", "cam_20", "cam_21"]
+  - path: "/mnt/driveL"
+    cameras: ["cam_22", "cam_23", "cam_24"]
+  - path: "/mnt/driveM"
+    cameras: ["cam_25", "cam_26", "cam_27"]
+  - path: "/mnt/driveO"
+    cameras: ["cam_28", "cam_29", "cam_30"]

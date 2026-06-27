@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+venv/
+.env
+*.egg-info/
+
+# Node / Frontend
+node_modules/
+dist/
+.vite/
+
+# Flutter
+mobile/.dart_tool/
+mobile/build/
+mobile/.flutter-plugins
+
+# Logs & temp
+*.log
+/tmp/hls/
+*.mp4
+*.jpg
+
+# IDE
+.vscode/
+.idea/
+*.swp
