@@ -1,4 +1,4 @@
-# CCTV NVR System — Custom Recording Application
+# nvr_cam — Custom NVR Recording Application
 
 > Sistem NVR custom berbasis Python + React untuk 30 kamera Dahua/ONVIF.
 > Tanpa lisensi channel, scalable, dan 100% open source.
@@ -7,7 +7,7 @@
 
 ```bash
 # Di server Ubuntu — 1 perintah install semua
-curl -fsSL https://raw.githubusercontent.com/USERNAME/cctv-system/main/scripts/install.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/silverefendy/nvr_cam/main/scripts/install.sh | sudo bash
 ```
 
 ## Akses Setelah Install
@@ -19,13 +19,13 @@ curl -fsSL https://raw.githubusercontent.com/USERNAME/cctv-system/main/scripts/i
 ## Update Aplikasi
 
 ```bash
-cd /opt/cctv && sudo bash scripts/update.sh
+cd /opt/nvr_cam && sudo bash scripts/update.sh
 ```
 
 ## Struktur Proyek
 
 ```
-cctv-system/
+nvr_cam/
 ├── backend/          ← Python (FastAPI, FFmpeg, OpenCV)
 │   ├── api/          ← REST API endpoints
 │   ├── core/         ← Config, security, logging, exceptions
@@ -62,16 +62,16 @@ cctv-system/
 ## Services
 
 ```bash
-systemctl status cctv-api        # FastAPI backend
-systemctl status cctv-recorder   # FFmpeg recording engine
-systemctl status cctv-motion     # OpenCV motion detection
-systemctl status cctv-encoder    # AV1 idle re-encoder
+systemctl status nvr-api        # FastAPI backend
+systemctl status nvr-recorder   # FFmpeg recording engine
+systemctl status nvr-motion     # OpenCV motion detection
+systemctl status nvr-encoder    # AV1 idle re-encoder
 ```
 
 ## Konfigurasi
 
 Edit file-file berikut sesuai setup:
-- `/opt/cctv/.env` — secrets (DB password, JWT, Telegram token)
-- `/opt/cctv/config/cameras.yaml` — daftar dan RTSP URL semua kamera
-- `/opt/cctv/config/storage.yaml` — mapping kamera ke drive HDD
-- `/opt/cctv/config/system.yaml` — threshold, jadwal, parameter sistem
+- `/opt/nvr_cam/.env` — secrets (DB password, JWT, Telegram token)
+- `/opt/nvr_cam/config/cameras.yaml` — daftar dan RTSP URL semua kamera
+- `/opt/nvr_cam/config/storage.yaml` — mapping kamera ke drive HDD
+- `/opt/nvr_cam/config/system.yaml` — threshold, jadwal, parameter sistem

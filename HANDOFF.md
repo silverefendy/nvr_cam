@@ -1,11 +1,11 @@
-# HANDOFF DOCUMENT — CCTV NVR System
+# HANDOFF DOCUMENT — nvr_cam
 ## Untuk melanjutkan development di sesi Claude baru
 
 ---
 
 ## Status Kerangka: SELESAI (Framework Ready)
 
-Kerangka aplikasi sudah dibuat lengkap di `/home/claude/cctv-system/` atau di GitHub repo.
+Kerangka aplikasi sudah dibuat lengkap di GitHub repo `silverefendy/nvr_cam`.
 Semua file sudah ada strukturnya. Yang perlu dilakukan selanjutnya adalah **mengisi implementasi** (TODO).
 
 ---
@@ -101,8 +101,8 @@ Semua file sudah ada strukturnya. Yang perlu dilakukan selanjutnya adalah **meng
 Paste teks berikut di awal sesi Claude baru:
 
 ```
-Saya sedang membangun aplikasi NVR CCTV custom.
-Kerangka sudah selesai di GitHub: https://github.com/USERNAME/cctv-system
+Saya sedang membangun aplikasi NVR CCTV custom bernama nvr_cam.
+Repo GitHub: https://github.com/silverefendy/nvr_cam
 
 Stack: Python FastAPI + PostgreSQL + FFmpeg + OpenCV (backend), React TypeScript Tailwind (frontend).
 
@@ -139,8 +139,8 @@ Tolong implementasikan: [nama file / fitur yang mau dikerjakan]
 
 ```bash
 # Clone repo
-git clone https://github.com/USERNAME/cctv-system
-cd cctv-system
+git clone https://github.com/silverefendy/nvr_cam
+cd nvr_cam
 
 # Backend
 python3 -m venv venv && source venv/bin/activate
@@ -161,11 +161,11 @@ cd frontend && npm install && npm run dev
 
 ---
 
-## Kontak Informasi Proyek
+## Informasi Proyek
 
 - **Topologi:** Pabrik (30 kamera Dahua) → P2P Ubiquiti → Kantor → P2P Ubiquiti → Rumah
 - **Remote:** ZeroTier di Mikrotik kantor + ZeroTier di rumah
 - **Server:** Ubuntu Server 24.04 + Intel i5 + 8x HDD WD Purple 4TB (ZFS)
 - **Codec:** H.265 dari kamera, re-encode AV1 saat idle malam
 - **Notifikasi:** Telegram Bot (gratis)
-- **Referensi awal:** github.com/silverefendy/nvr_cam (dikembangkan jauh lebih lengkap)
+- **Repo:** https://github.com/silverefendy/nvr_cam
