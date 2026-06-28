@@ -1,13 +1,13 @@
 [Unit]
-Description=CCTV NVR — Motion Detection Engine
-After=network.target cctv-recorder.service
+Description=NVR Cam — Motion Detection Engine
+After=network.target nvr-recorder.service
 
 [Service]
 Type=simple
-User=www-data
-WorkingDirectory=/opt/cctv
-EnvironmentFile=/opt/cctv/.env
-ExecStart=/opt/cctv/venv/bin/python -m backend.services.motion.detector
+User=nvr
+WorkingDirectory=/opt/nvr_cam
+EnvironmentFile=/opt/nvr_cam/.env
+ExecStart=/opt/nvr_cam/venv/bin/python -m backend.services.motion.detector
 Restart=always
 RestartSec=15
 StandardOutput=journal

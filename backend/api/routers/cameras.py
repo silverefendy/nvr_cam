@@ -2,7 +2,7 @@
 Router: /api/v1/cameras
 CRUD kamera + snapshot + test koneksi RTSP
 """
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.db.base import get_db
@@ -11,25 +11,61 @@ from backend.db.models.camera import Camera
 from backend.api.schemas.camera import CameraCreate, CameraUpdate, CameraResponse
 from backend.api.middleware.auth import get_current_user, require_role
 from backend.db.models.user import User
+from backend.services.recorder.ffmpeg_wrapper import probe_stream
 
 router = APIRouter(tags=["cameras"])
 
 
-@router.get("", response_model=list[CameraResponse])
+@router.get("")
 async def list_cameras(
+    request: Request,
     db: AsyncSession = Depends(get_db),
     _: User = Depends(get_current_user),
 ):
     """Daftar semua kamera aktif beserta status online/offline."""
     repo = CameraRepository(db)
     cameras = await repo.get_active_cameras()
-    # TODO: inject status online/offline dari RecordingManager
-    return cameras
+    
+    # Inject live status from RecordingManager
+    recording_manager = request.app.state.recording_manager
+    result = []
+    
+    for cam in cameras:
+        camera_dict = {
+            "id": cam.id,
+            "name": cam.name,
+            "location": cam.location,
+            "rtsp_main": cam.rtsp_main,
+            "rtsp_sub": cam.rtsp_sub,
+            "storage_drive": cam.storage_drive,
+            "motion_enabled": cam.motion_enabled,
+            "retention_days": cam.retention_days,
+            "segment_duration": cam.segment_duration,
+            "status": cam.status,
+            "is_active": cam.is_active,
+            "sort_order": cam.sort_order,
+            "config_json": cam.config_json,
+            "last_seen": cam.last_seen,
+        }
+        
+        # Get real-time status from RecordingManager
+        if recording_manager:
+            is_online = recording_manager.get_status(cam.id)
+            camera_dict["is_online"] = is_online
+            if is_online:
+                camera_dict["status"] = "online"
+            else:
+                camera_dict["status"] = "offline"
+        
+        result.append(camera_dict)
+    
+    return result
 
 
-@router.get("/{camera_id}", response_model=CameraResponse)
+@router.get("/{camera_id}")
 async def get_camera(
     camera_id: str,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     _: User = Depends(get_current_user),
 ):
@@ -37,10 +73,38 @@ async def get_camera(
     camera = await repo.get_by_id(camera_id)
     if not camera:
         raise HTTPException(status_code=404, detail=f"Kamera {camera_id} tidak ditemukan")
-    return camera
+    
+    camera_dict = {
+        "id": camera.id,
+        "name": camera.name,
+        "location": camera.location,
+        "rtsp_main": camera.rtsp_main,
+        "rtsp_sub": camera.rtsp_sub,
+        "storage_drive": camera.storage_drive,
+        "motion_enabled": camera.motion_enabled,
+        "retention_days": camera.retention_days,
+        "segment_duration": camera.segment_duration,
+        "status": camera.status,
+        "is_active": camera.is_active,
+        "sort_order": camera.sort_order,
+        "config_json": camera.config_json,
+        "last_seen": camera.last_seen,
+    }
+    
+    # Get real-time status from RecordingManager
+    recording_manager = request.app.state.recording_manager
+    if recording_manager:
+        is_online = recording_manager.get_status(camera_id)
+        camera_dict["is_online"] = is_online
+        if is_online:
+            camera_dict["status"] = "online"
+        else:
+            camera_dict["status"] = "offline"
+    
+    return camera_dict
 
 
-@router.post("", response_model=CameraResponse, status_code=201)
+@router.post("", status_code=201)
 async def create_camera(
     body: CameraCreate,
     db: AsyncSession = Depends(get_db),
@@ -52,7 +116,7 @@ async def create_camera(
     return await repo.create(camera)
 
 
-@router.put("/{camera_id}", response_model=CameraResponse)
+@router.put("/{camera_id}")
 async def update_camera(
     camera_id: str,
     body: CameraUpdate,
@@ -88,8 +152,8 @@ async def get_snapshot(
     _: User = Depends(get_current_user),
 ):
     """Ambil snapshot terbaru dari kamera (file JPG)."""
-    # TODO: implementasi — ambil dari folder snapshot
-    return {"snapshot_url": f"/snapshots/{camera_id}/latest.jpg"}
+    # Return snapshot URL - actual file served by stream router
+    return {"snapshot_url": f"/api/v1/stream/{camera_id}/snapshot.jpg"}
 
 
 @router.post("/{camera_id}/test")
@@ -103,5 +167,18 @@ async def test_connection(
     camera = await repo.get_by_id(camera_id)
     if not camera:
         raise HTTPException(status_code=404)
-    # TODO: implementasi — jalankan ffprobe singkat untuk test
-    return {"status": "ok", "message": "Koneksi berhasil"}
+    
+    # Test RTSP connection using ffprobe
+    stream_info = probe_stream(camera.rtsp_main)
+    
+    if stream_info:
+        return {
+            "status": "success",
+            "message": "Koneksi berhasil",
+            "stream_info": stream_info
+        }
+    else:
+        return {
+            "status": "failed",
+            "message": "Tidak dapat terhubung ke kamera"
+        }

@@ -1,60 +1,48 @@
 """
-WebSocket endpoint untuk real-time events ke dashboard.
+WebSocket connection manager for real-time events to dashboard.
 """
-import asyncio
 import json
-from typing import set as Set
+from typing import Set
+from fastapi import WebSocket, WebSocketDisconnect
+from backend.core.logging import get_logger
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
-import structlog
+logger = get_logger(__name__, service="websocket")
 
-log = structlog.get_logger(__name__)
-ws_router = APIRouter()
 
-# Manager untuk semua koneksi WebSocket aktif
 class ConnectionManager:
+    """Manager for all active WebSocket connections."""
+    
     def __init__(self):
-        self.active: set[WebSocket] = set()
+        self.active: Set[WebSocket] = set()
 
     async def connect(self, ws: WebSocket):
+        """Accept and register a new WebSocket connection."""
         await ws.accept()
         self.active.add(ws)
-        log.info("ws.connected", total=len(self.active))
+        logger.info(f"WebSocket connected. Total active: {len(self.active)}")
 
     def disconnect(self, ws: WebSocket):
+        """Remove a WebSocket connection."""
         self.active.discard(ws)
-        log.info("ws.disconnected", total=len(self.active))
+        logger.info(f"WebSocket disconnected. Total active: {len(self.active)}")
 
     async def broadcast(self, event_type: str, data: dict):
-        """Kirim event ke semua client yang terhubung."""
+        """Send event to all connected clients."""
         message = json.dumps({"type": event_type, "data": data})
         dead = set()
         for ws in self.active:
             try:
                 await ws.send_text(message)
-            except Exception:
+            except Exception as e:
+                logger.error(f"Error sending to WebSocket: {e}")
                 dead.add(ws)
         self.active -= dead
 
-
-manager = ConnectionManager()
-
-
-@ws_router.websocket("/ws/events")
-async def websocket_events(ws: WebSocket):
-    """
-    Real-time event stream.
-    Client subscribe untuk mendapat update:
-    - motion_detected
-    - camera_status_changed
-    - storage_warning
-    - recording_started / recording_stopped
-    """
-    await manager.connect(ws)
-    try:
-        while True:
-            # Terima pesan dari client (misal: subscribe filter kamera tertentu)
-            data = await ws.receive_text()
-            # TODO: handle subscription filter
-    except WebSocketDisconnect:
-        manager.disconnect(ws)
+    async def send_personal(self, ws: WebSocket, event_type: str, data: dict):
+        """Send event to a specific client."""
+        message = json.dumps({"type": event_type, "data": data})
+        try:
+            await ws.send_text(message)
+        except Exception as e:
+            logger.error(f"Error sending to WebSocket: {e}")
+            self.disconnect(ws)

@@ -26,3 +26,11 @@ class CameraRepository(BaseRepository[Camera]):
             select(Camera).where(Camera.motion_enabled == True, Camera.is_active == True)
         )
         return result.scalars().all()
+
+    async def update_status(self, camera_id: str, status: str):
+        camera = await self.get_by_id(camera_id)
+        if camera:
+            camera.status = status
+            await self.db.commit()
+            await self.db.refresh(camera)
+        return camera

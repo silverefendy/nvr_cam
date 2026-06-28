@@ -11,6 +11,7 @@ alembic==1.13.3
 pyjwt==2.9.0
 bcrypt==4.2.0
 python-multipart==0.0.12
+passlib[bcrypt]==1.7.4
 
 # Config
 pydantic-settings==2.5.2
@@ -27,6 +28,8 @@ aiohttp==3.10.0
 # Utilities
 psutil==6.0.0
 schedule==1.2.2
+structlog==24.4.0
+apscheduler==3.10.4
 
 # Dev / testing
 pytest==8.3.0

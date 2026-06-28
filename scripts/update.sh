@@ -1,9 +1,9 @@
 #!/bin/bash
 set -euo pipefail
-cd /opt/cctv
+cd /opt/nvr_cam
 git pull
-./venv/bin/pip install -q -r backend/requirements.txt
-./venv/bin/alembic upgrade head
+sudo -u nvr ./venv/bin/pip install -q -r backend/requirements.txt
+sudo -u nvr ./venv/bin/alembic upgrade head
 cd frontend && npm install -q && npm run build && cd ..
-systemctl restart cctv-api cctv-motion cctv-encoder
+systemctl restart nvr-api nvr-recorder nvr-motion nvr-encoder
 echo "Update selesai!"

@@ -1,13 +1,13 @@
 [Unit]
-Description=CCTV NVR — Recording Engine
+Description=NVR Cam — Recording Engine
 After=network.target
 
 [Service]
 Type=simple
-User=www-data
-WorkingDirectory=/opt/cctv
-EnvironmentFile=/opt/cctv/.env
-ExecStart=/opt/cctv/venv/bin/python -m backend.services.recorder.manager
+User=nvr
+WorkingDirectory=/opt/nvr_cam
+EnvironmentFile=/opt/nvr_cam/.env
+ExecStart=/opt/nvr_cam/venv/bin/python -m backend.services.recorder.manager
 Restart=always
 RestartSec=15
 StandardOutput=journal

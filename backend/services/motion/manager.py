@@ -1,36 +1,66 @@
 """
-MotionManager — kelola semua MotionDetector.
+MotionManager — manage all MotionDetector instances.
 """
 import asyncio
-import structlog
-from services.motion.detector import MotionDetector
-from utils.config_loader import load_cameras
+from backend.core.logging import get_logger
+from backend.services.motion.detector import MotionDetector
+from backend.services.notifier.telegram import notify_motion
 
-log = structlog.get_logger(__name__)
+logger = get_logger(__name__, service="motion")
 
 
 class MotionManager:
-    def __init__(self, notifier=None):
+    def __init__(self):
         self.detectors: dict[str, MotionDetector] = {}
-        self.notifier = notifier
+        self._running = False
 
-    async def start(self):
-        cameras = load_cameras()
-        motion_cameras = [c for c in cameras if c.get("motion_detect") and c.get("is_active")]
-        log.info("motion.starting", count=len(motion_cameras))
-
+    async def start_all(self, cameras: list[dict]):
+        """Start motion detection for all motion-enabled cameras."""
+        self._running = True
+        motion_cameras = [c for c in cameras if c.get("motion_enabled")]
+        logger.info(f"Starting motion detection for {len(motion_cameras)} cameras")
+        
+        tasks = []
         for cam in motion_cameras:
             detector = MotionDetector(cam, on_motion_callback=self._handle_motion)
             self.detectors[cam["id"]] = detector
-            await detector.start()
-
-    async def stop(self):
-        tasks = [d.stop() for d in self.detectors.values()]
+            tasks.append(detector.run())
+        
         await asyncio.gather(*tasks, return_exceptions=True)
 
-    async def _handle_motion(self, camera_id: str, zone: str, frame, severity: int):
-        """Dipanggil setiap motion terdeteksi — simpan ke DB dan notif."""
-        log.info("motion.detected", camera=camera_id, zone=zone, severity=severity)
-        # TODO: simpan snapshot, tulis ke DB, kirim notifikasi
-        if self.notifier:
-            await self.notifier.send_motion_alert(camera_id, zone, frame, severity)
+    async def stop_all(self):
+        """Stop all motion detectors."""
+        self._running = False
+        logger.info("Motion detection stopped")
+
+    async def _handle_motion(self, camera_id: str, zone_name: str, snapshot_path: str):
+        """Called when motion detected — save to DB and notify."""
+        logger.info(f"Motion detected: {camera_id} zone={zone_name}")
+        
+        # Save to DB
+        from backend.db.base import AsyncSessionLocal
+        from backend.db.repositories.event_repo import EventRepository
+        from backend.db.models.motion_event import MotionEvent
+        from datetime import datetime, timezone
+        
+        try:
+            async with AsyncSessionLocal() as db:
+                event_repo = EventRepository(db)
+                event = MotionEvent(
+                    camera_id=camera_id,
+                    zone_name=zone_name,
+                    started_at=datetime.now(timezone.utc),
+                    snapshot_path=snapshot_path,
+                    severity=1,
+                    notified=False
+                )
+                await event_repo.create(event)
+                await db.commit()
+        except Exception as e:
+            logger.error(f"Failed to save motion event to DB: {e}")
+        
+        # Send Telegram notification
+        detector = self.detectors.get(camera_id)
+        if detector:
+            camera_name = detector.camera.get("name", camera_id)
+            await notify_motion(camera_name, zone_name, snapshot_path)

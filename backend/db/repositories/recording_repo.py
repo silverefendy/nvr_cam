@@ -1,7 +1,7 @@
 """Repository untuk operasi database terkait Recording."""
 from datetime import datetime
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_, func
+from sqlalchemy import select, and_, func, delete
 from backend.db.models.recording import Recording
 from .base_repo import BaseRepository
 
@@ -52,3 +52,17 @@ class RecordingRepository(BaseRepository[Recording]):
             ).order_by(Recording.started_at).limit(limit)
         )
         return result.scalars().all()
+
+    async def delete_old(self, camera_id: str, before_date: datetime) -> int:
+        """Delete recordings older than specified date."""
+        result = await self.db.execute(
+            delete(Recording).where(
+                and_(
+                    Recording.camera_id == camera_id,
+                    Recording.started_at < before_date,
+                    Recording.is_protected == False,
+                )
+            )
+        )
+        await self.db.commit()
+        return result.rowcount

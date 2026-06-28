@@ -1,14 +1,14 @@
 [Unit]
-Description=CCTV NVR — FastAPI Backend
+Description=NVR Cam — FastAPI Backend
 After=network.target postgresql.service
 Wants=postgresql.service
 
 [Service]
 Type=simple
-User=www-data
-WorkingDirectory=/opt/cctv
-EnvironmentFile=/opt/cctv/.env
-ExecStart=/opt/cctv/venv/bin/uvicorn backend.api.app:app --host 0.0.0.0 --port 8000
+User=nvr
+WorkingDirectory=/opt/nvr_cam
+EnvironmentFile=/opt/nvr_cam/.env
+ExecStart=/opt/nvr_cam/venv/bin/uvicorn backend.api.app:app --host 0.0.0.0 --port 8000
 Restart=always
 RestartSec=10
 StandardOutput=journal
