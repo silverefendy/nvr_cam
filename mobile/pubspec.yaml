@@ -17,40 +17,21 @@ dependencies:
   flutter_riverpod: ^2.4.9
   
   # HTTP
-  http: ^1.1.2
   dio: ^5.4.0
   
   # Storage
   shared_preferences: ^2.2.2
   
-  # Video Player
-  video_player: ^2.8.2
-  chewie: ^1.7.4
-  
-  # WebRTC for RTSP streaming
+  # Video Player for RTSP streaming
   flutter_vlc_player: ^7.4.0
-  
-  # JSON Serialization
-  json_annotation: ^4.8.1
   
   # Date/Time
   intl: ^0.18.1
-  
-  # Icons
-  font_awesome_flutter: ^10.6.0
-  
-  # Pull to Refresh
-  pull_to_refresh: ^2.0.0
-  
-  # Image Picker
-  image_picker: ^1.0.7
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^3.0.1
-  build_runner: ^2.4.8
-  json_serializable: ^6.7.1
 
 flutter:
   uses-material-design: true

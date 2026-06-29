@@ -107,4 +107,46 @@ class ApiService {
       return {};
     }
   }
+
+  // Events
+  Future<List<Map<String, dynamic>>> getEvents({int limit = 50}) async {
+    try {
+      final response = await _dio.get('/api/v1/events', queryParameters: {'limit': limit});
+      if (response.statusCode == 200) {
+        final data = response.data;
+        if (data is List) return List<Map<String, dynamic>>.from(data);
+        if (data['data'] is List) return List<Map<String, dynamic>>.from(data['data']);
+      }
+      return [];
+    } catch (e) {
+      return [];
+    }
+  }
+
+  // Recordings
+  Future<List<Map<String, dynamic>>> getRecordings({
+    required String cameraId,
+    required DateTime dateFrom,
+    required DateTime dateTo,
+  }) async {
+    try {
+      final response = await _dio.get('/api/v1/recordings', queryParameters: {
+        'camera_id': cameraId,
+        'date_from': dateFrom.toIso8601String(),
+        'date_to': dateTo.toIso8601String(),
+      });
+      if (response.statusCode == 200) {
+        final data = response.data;
+        if (data is List) return List<Map<String, dynamic>>.from(data);
+        if (data['data'] is List) return List<Map<String, dynamic>>.from(data['data']);
+      }
+      return [];
+    } catch (e) {
+      return [];
+    }
+  }
+
+  String getRecordingUrl(String recordingId) {
+    return '$_baseUrl/api/v1/recordings/$recordingId/play';
+  }
 }

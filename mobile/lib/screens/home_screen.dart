@@ -35,7 +35,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
   Future<void> _handleLogout() async {
     await _apiService.clearAuth();
-    final prefs = await ref.read(sharedPreferencesProvider);
+    final prefs = ref.read(sharedPreferencesProvider);
     await prefs.setBool('isLoggedIn', false);
     if (mounted) {
       Navigator.of(context).pushReplacementNamed('/login');

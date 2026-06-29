@@ -175,6 +175,8 @@ def create_app() -> FastAPI:
     app.include_router(users.router,      prefix="/api/v1/users")
     app.include_router(settings.router,   prefix="/api/v1/settings")
     app.include_router(system.router,     prefix="/api/v1/system")
+    app.include_router(config_router.router,    prefix="/api/v1/config")
+    app.include_router(discovery_router.router, prefix="/api/v1/discovery")
 
     return app
 
