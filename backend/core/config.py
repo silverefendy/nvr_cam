@@ -12,10 +12,10 @@ class Settings(BaseSettings):
     db_port: int = 5432
     db_name: str = "cctv_db"
     db_user: str = "cctv_user"
-    db_password: str
+    db_password: str = "changeme"
 
     # JWT
-    jwt_secret: str
+    jwt_secret: str = "changeme-secret-key-for-development-only"
     jwt_access_expire_minutes: int = 60
     jwt_refresh_expire_days: int = 7
 
@@ -32,6 +32,7 @@ class Settings(BaseSettings):
     # Storage
     storage_threshold_pct: float = 10.0
     hls_temp_dir: str = "/tmp/hls"
+    config_dir: str = "config"
 
     # App
     app_env: str = "production"

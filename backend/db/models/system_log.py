@@ -11,5 +11,5 @@ class SystemLog(Base):
     level: Mapped[str] = mapped_column(String(10))
     service: Mapped[str] = mapped_column(String(30))
     message: Mapped[str] = mapped_column(String(1000))
-    metadata: Mapped[dict | None] = mapped_column(JSON)
+    log_metadata: Mapped[dict | None] = mapped_column(JSON)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))

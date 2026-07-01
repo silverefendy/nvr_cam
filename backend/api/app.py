@@ -12,8 +12,12 @@ from fastapi.responses import JSONResponse
 
 from backend.core.exceptions import CCTVBaseException
 from backend.core.logging import get_logger
-from backend.core.config import settings
-from backend.api.routers import auth, cameras, stream, recordings, events, storage, users, settings, system
+from backend.core.config import settings as app_settings
+from backend.api.routers import (
+    auth, cameras, stream, recordings, events, storage, users,
+    settings as settings_router, system,
+    config as config_router, discovery as discovery_router,
+)
 from backend.db.base import AsyncSessionLocal
 from backend.db.repositories.camera_repo import CameraRepository
 from backend.db.models.camera import Camera
@@ -172,9 +176,9 @@ def create_app() -> FastAPI:
     app.include_router(recordings.router, prefix="/api/v1/recordings")
     app.include_router(events.router,     prefix="/api/v1/events")
     app.include_router(storage.router,    prefix="/api/v1/storage")
-    app.include_router(users.router,      prefix="/api/v1/users")
-    app.include_router(settings.router,   prefix="/api/v1/settings")
-    app.include_router(system.router,     prefix="/api/v1/system")
+    app.include_router(users.router,         prefix="/api/v1/users")
+    app.include_router(settings_router.router, prefix="/api/v1/settings")
+    app.include_router(system.router,       prefix="/api/v1/system")
     app.include_router(config_router.router,    prefix="/api/v1/config")
     app.include_router(discovery_router.router, prefix="/api/v1/discovery")
 

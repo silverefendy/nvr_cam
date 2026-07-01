@@ -27,6 +27,7 @@ from backend.api.schemas.config import (
     ConfigResponse,
 )
 from backend.services.notifier.telegram import TelegramNotifier
+from backend.services.notifier.email import EmailNotifier
 from backend.utils.config_manager import config_manager
 
 router = APIRouter(prefix="/config", tags=["config"])
@@ -241,9 +242,15 @@ async def test_notification(
             errors.append(f"Telegram failed: {str(e)}")
     
     if request.email:
-        # Email test implementation would go here
-        # For now, mark as not implemented
-        errors.append("Email test not yet implemented")
+        try:
+            email_notifier = EmailNotifier()
+            await email_notifier.send_message(
+                subject="NVR Cam Test Notification",
+                body=request.test_message
+            )
+            results["email_sent"] = True
+        except Exception as e:
+            errors.append(f"Email failed: {str(e)}")
     
     return NotificationTestResponse(
         success=len(errors) == 0,
@@ -254,17 +261,65 @@ async def test_notification(
 
 # Config Apply Endpoint
 @router.post("/apply", response_model=ConfigApplyResponse)
-async def apply_config(_user=Depends(get_current_admin_user)):
+async def apply_config(request: Request, _user=Depends(get_current_admin_user)):
     """Apply all configuration changes and restart affected services."""
     try:
-        # This would integrate with the recording manager to reload cameras
-        # For now, return a placeholder response
+        recording_manager = request.app.state.recording_manager
+        motion_manager = request.app.state.motion_manager
+        
+        # Reload cameras from database and restart recording
+        cameras = await recording_manager.load_cameras_from_db()
+        
+        # Get current camera IDs
+        current_ids = set(recording_manager.recorders.keys())
+        new_ids = {cam["id"] for cam in cameras if cam.get("is_active", True)}
+        
+        # Cameras to stop (removed or deactivated)
+        to_stop = current_ids - new_ids
+        # Cameras to start (new or reactivated)
+        to_start = new_ids - current_ids
+        # Cameras to restart (configuration changed)
+        to_restart = current_ids & new_ids
+        
+        restarted = []
+        started = []
+        stopped = []
+        
+        # Stop removed/deactivated cameras
+        for camera_id in to_stop:
+            if camera_id in recording_manager.recorders:
+                await recording_manager.recorders[camera_id].stop()
+                del recording_manager.recorders[camera_id]
+                stopped.append(camera_id)
+        
+        # Restart cameras with config changes
+        for camera_id in to_restart:
+            await recording_manager.restart_camera(camera_id)
+            restarted.append(camera_id)
+        
+        # Start new cameras
+        for camera_id in to_start:
+            cam_dict = next((c for c in cameras if c["id"] == camera_id), None)
+            if cam_dict:
+                from backend.services.recorder.camera_recorder import CameraRecorder
+                recorder = CameraRecorder(cam_dict)
+                recording_manager.recorders[camera_id] = recorder
+                asyncio.create_task(recorder.start())
+                started.append(camera_id)
+        
+        # Restart motion manager if motion settings changed
+        if motion_manager:
+            motion_cameras = [cam for cam in cameras if cam.get("motion_enabled")]
+            await motion_manager.stop_all()
+            if motion_cameras:
+                asyncio.create_task(motion_manager.start_all(motion_cameras))
+        
         return ConfigApplyResponse(
             success=True,
-            message="Configuration applied successfully",
-            restarted=[],
-            started=[],
-            stopped=[],
+            message=f"Configuration applied: {len(restarted)} restarted, {len(started)} started, {len(stopped)} stopped",
+            restarted=restarted,
+            started=started,
+            stopped=stopped,
         )
     except Exception as e:
         return ConfigApplyResponse(

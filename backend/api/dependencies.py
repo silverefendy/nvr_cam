@@ -5,14 +5,13 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.config import get_settings
-from core.constants import Role
-from db.connection import get_db
-from db.models import User
-from db.repositories.camera_repo import CameraRepository
-from db.repositories.recording_repo import RecordingRepository
-from db.repositories.event_repo import EventRepository
-from services.auth.jwt_handler import decode_token
+from backend.core.config import get_settings
+from backend.core.security import decode_token
+from backend.db.base import get_db
+from backend.db.models.user import User
+from backend.db.repositories.camera_repo import CameraRepository
+from backend.db.repositories.recording_repo import RecordingRepository
+from backend.db.repositories.event_repo import EventRepository
 
 security = HTTPBearer()
 settings = get_settings()
@@ -41,6 +40,13 @@ def require_role(*roles: str):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Akses ditolak")
         return current_user
     return checker
+
+
+async def get_current_admin_user(current_user: User = Depends(get_current_user)) -> User:
+    """Dependency untuk user dengan role admin."""
+    if current_user.role != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Akses ditolak - admin only")
+    return current_user
 
 
 # ── Repository dependencies ───────────────────────────────────

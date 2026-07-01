@@ -4,6 +4,7 @@ System health check utilities.
 import psutil
 import time
 from pathlib import Path
+from typing import Optional
 
 
 def get_cpu_percent(interval: float = 1.0) -> float:
@@ -100,3 +101,63 @@ def get_service_uptime(service_name: str) -> float | None:
     except Exception:
         pass
     return None
+
+
+def get_disk_status(drive_paths: list[str] = None) -> list[dict]:
+    """Get detailed disk status for each drive."""
+    if drive_paths is None:
+        # Default to common mount points
+        if Path("/").exists():
+            drive_paths = ["/"]
+        else:
+            # Windows fallback
+            drive_paths = [str(Path.home().anchor)]
+    
+    drives = []
+    for path in drive_paths:
+        if Path(path).exists():
+            try:
+                usage = psutil.disk_usage(path)
+                drives.append({
+                    "path": path,
+                    "total_gb": usage.total / (1024**3),
+                    "used_gb": usage.used / (1024**3),
+                    "free_gb": usage.free / (1024**3),
+                    "free_pct": (usage.free / usage.total * 100) if usage.total > 0 else 0,
+                    "used_pct": (usage.used / usage.total * 100) if usage.total > 0 else 0,
+                })
+            except Exception:
+                pass
+    
+    return drives
+
+
+def get_camera_status(recording_manager: Optional[object] = None) -> dict:
+    """Get camera status from RecordingManager."""
+    if recording_manager is None:
+        return {
+            "online": 0,
+            "offline": 0,
+            "total": 0,
+            "status": "unavailable"
+        }
+    
+    try:
+        status = recording_manager.get_status()
+        online_count = recording_manager.get_online_count()
+        offline_count = recording_manager.get_offline_count()
+        
+        return {
+            "online": online_count,
+            "offline": offline_count,
+            "total": online_count + offline_count,
+            "status": "available",
+            "details": status
+        }
+    except Exception:
+        return {
+            "online": 0,
+            "offline": 0,
+            "total": 0,
+            "status": "error"
+        }
