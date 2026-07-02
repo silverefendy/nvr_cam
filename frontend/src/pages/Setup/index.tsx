@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { CameraDiscovery } from './CameraDiscovery'
 
@@ -6,11 +6,6 @@ type SetupStep = 'welcome' | 'discovery' | 'storage' | 'notifications' | 'comple
 
 export default function SetupPage() {
   const [currentStep, setCurrentStep] = useState<SetupStep>('welcome')
-  const [setupData, setSetupData] = useState({
-    cameras: [],
-    storage: {},
-    notifications: {},
-  })
 
   const { data: hasSetup } = useQuery({
     queryKey: ['setup-status'],
@@ -73,10 +68,7 @@ export default function SetupPage() {
       case 'discovery':
         return (
           <CameraDiscovery
-            onNext={(cameras) => {
-              setSetupData(prev => ({ ...prev, cameras }))
-              setCurrentStep('storage')
-            }}
+            onNext={() => setCurrentStep('storage')}
             onSkip={() => setCurrentStep('storage')}
           />
         )

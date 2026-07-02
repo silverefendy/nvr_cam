@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
 
 interface NotificationFormData {
@@ -40,12 +40,14 @@ export const NotificationForm: React.FC<Props> = ({ initialData, onSave }) => {
       if (!response.ok) throw new Error('Failed to fetch notifications config')
       return response.json()
     },
-    onSuccess: (data) => {
-      if (!initialData) {
-        setFormData(data.data || {})
-      }
-    },
   })
+
+  // Load initial data when config is fetched
+  useEffect(() => {
+    if (currentConfig && !initialData) {
+      setFormData(currentConfig.data || {})
+    }
+  }, [currentConfig, initialData])
 
   const updateMutation = useMutation({
     mutationFn: async (data: NotificationFormData) => {

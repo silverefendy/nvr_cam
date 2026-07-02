@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import { useState } from 'react'
 import { useQuery } from "@tanstack/react-query"
 import { camerasApi } from "@/api/cameras"
 import { recordingsApi } from "@/api/recordings"
@@ -12,17 +12,12 @@ export default function PlaybackPage() {
   const { data: cameras } = useQuery({ queryKey: ["cameras"], queryFn: camerasApi.list })
   const { data: recs } = useQuery({
     queryKey: ["recs", camId, date],
-    queryFn: () => recordingsApi.list({ camera_id: camId, date: date }),
-    enabled: !!camId
-  })
-  const { data: timeline } = useQuery({
-    queryKey: ["timeline", camId, date],
-    queryFn: () => recordingsApi.getTimeline(camId, date),
+    queryFn: () => recordingsApi.list({ camera_id: camId, date_from: date, date_to: date }),
     enabled: !!camId
   })
 
   const filteredRecs = selectedHour !== null 
-    ? recs?.filter(r => new Date(r.started_at).getHours() === selectedHour)
+    ? recs?.filter((r: any) => new Date(r.started_at).getHours() === selectedHour)
     : recs
 
   return (
@@ -41,27 +36,7 @@ export default function PlaybackPage() {
       </div>
 
       {/* Timeline */}
-      {timeline && (
-        <div className="bg-gray-800 rounded p-2 flex-shrink-0">
-          <div className="flex gap-1 overflow-x-auto">
-            {timeline.timeline.map((block: any) => (
-              <button
-                key={block.hour}
-                onClick={() => setSelectedHour(block.hour)}
-                className={`flex-shrink-0 w-12 h-12 rounded flex flex-col items-center justify-center text-xs ${
-                  selectedHour === block.hour ? "bg-blue-600" : "bg-gray-700 hover:bg-gray-600"
-                }`}
-              >
-                <span>{block.hour}:00</span>
-                <div className="flex gap-1 mt-1">
-                  {block.has_recording && <span className="w-2 h-2 bg-green-500 rounded-full" />}
-                  {block.has_motion && <span className="w-2 h-2 bg-yellow-500 rounded-full" />}
-                </div>
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
+      {/* Timeline feature temporarily disabled - getTimeline not implemented */}
 
       <div className="flex-1 flex gap-2 overflow-hidden">
         {/* Recordings List */}

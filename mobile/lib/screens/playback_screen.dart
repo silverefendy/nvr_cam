@@ -60,8 +60,10 @@ class _PlaybackScreenState extends State<PlaybackScreen> {
   Future<void> _playRecording(Map<String, dynamic> recording) async {
     _vlcController?.dispose();
     final url = _apiService.getRecordingUrl(recording['id']);
-    final controller = VlcPlayerController(
-      dataSource: url, autoPlay: true, autoInitialize: true,
+    final controller = VlcPlayerController.network(
+      url,
+      autoPlay: true,
+      options: const VlcPlayerOptions(),
     );
     await controller.initialize();
     if (mounted) setState(() { _vlcController = controller; _playingRecording = recording; });

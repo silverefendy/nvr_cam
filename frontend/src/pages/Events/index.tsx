@@ -1,8 +1,7 @@
-import React, { useState } from 'react'
+import { useState } from 'react'
 import { useQuery } from "@tanstack/react-query"
 import { eventsApi } from "@/api/events"
 import { camerasApi } from "@/api/cameras"
-import type { MotionEvent, Camera } from "@/types"
 
 export default function EventsPage() {
   const [selectedCamera, setSelectedCamera] = useState<string>("")

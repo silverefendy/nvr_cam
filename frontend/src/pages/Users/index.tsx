@@ -1,7 +1,8 @@
-import React, { useState } from 'react'
+import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { usersApi } from "@/api/users"
 import type { User } from "@/types"
+import { useEffect } from 'react'
 
 export default function UsersPage() {
   const [editingId, setEditingId] = useState<number | null>(null)
@@ -14,46 +15,55 @@ export default function UsersPage() {
 
   const createMutation = useMutation({
     mutationFn: usersApi.create,
-    onSuccess: () => {
+  })
+
+  useEffect(() => {
+    if (createMutation.isSuccess) {
       queryClient.invalidateQueries({ queryKey: ["users"] })
       setShowAddForm(false)
       setFormData({})
       setMessage({ type: "success", text: "User created successfully" })
       setTimeout(() => setMessage(null), 3000)
-    },
-    onError: () => {
+    }
+    if (createMutation.isError) {
       setMessage({ type: "error", text: "Failed to create user" })
       setTimeout(() => setMessage(null), 3000)
     }
-  })
+  }, [createMutation.isSuccess, createMutation.isError, queryClient])
 
   const updateMutation = useMutation({
     mutationFn: ({ id, data }: { id: number; data: Partial<User> }) => usersApi.update(id, data),
-    onSuccess: () => {
+  })
+
+  useEffect(() => {
+    if (updateMutation.isSuccess) {
       queryClient.invalidateQueries({ queryKey: ["users"] })
       setEditingId(null)
       setFormData({})
       setMessage({ type: "success", text: "User updated successfully" })
       setTimeout(() => setMessage(null), 3000)
-    },
-    onError: () => {
+    }
+    if (updateMutation.isError) {
       setMessage({ type: "error", text: "Failed to update user" })
       setTimeout(() => setMessage(null), 3000)
     }
-  })
+  }, [updateMutation.isSuccess, updateMutation.isError, queryClient])
 
   const deleteMutation = useMutation({
     mutationFn: usersApi.delete,
-    onSuccess: () => {
+  })
+
+  useEffect(() => {
+    if (deleteMutation.isSuccess) {
       queryClient.invalidateQueries({ queryKey: ["users"] })
       setMessage({ type: "success", text: "User deleted successfully" })
       setTimeout(() => setMessage(null), 3000)
-    },
-    onError: () => {
+    }
+    if (deleteMutation.isError) {
       setMessage({ type: "error", text: "Failed to delete user" })
       setTimeout(() => setMessage(null), 3000)
     }
-  })
+  }, [deleteMutation.isSuccess, deleteMutation.isError, queryClient])
 
   const handleEdit = (user: User) => {
     setEditingId(user.id)

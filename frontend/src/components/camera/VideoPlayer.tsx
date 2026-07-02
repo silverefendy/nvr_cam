@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import { useState } from 'react'
 import { useHLSPlayer } from "@/hooks/useHLSPlayer"
 import { camerasApi } from "@/api/cameras"
 import { useQuery } from "@tanstack/react-query"
@@ -27,7 +27,7 @@ export const VideoPlayer: React.FC<Props> = ({ cameraId, className, onClick, lab
   const handleSnapshot = async (e: React.MouseEvent) => {
     e.stopPropagation()
     try {
-      const url = await camerasApi.getSnapshot(cameraId)
+      const url = await camerasApi.snapshot(cameraId)
       setSnapshotUrl(url)
       setShowSnapshotView(true)
     } catch (err) {

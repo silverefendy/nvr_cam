@@ -1,7 +1,8 @@
-import React, { useState } from 'react'
+import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { CameraForm } from "@/components/camera/CameraForm"
 import type { Camera } from "@/types"
+import { useEffect } from 'react'
 
 export default function CamerasPage() {
   const [showForm, setShowForm] = useState(false)
@@ -36,8 +37,13 @@ export default function CamerasPage() {
       if (!response.ok) throw new Error('Failed to delete camera')
       return response.json()
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["cameras"] })
   })
+
+  useEffect(() => {
+    if (deleteMutation.isSuccess) {
+      queryClient.invalidateQueries({ queryKey: ["cameras"] })
+    }
+  }, [deleteMutation.isSuccess, queryClient])
 
   const handleAdd = () => {
     setEditingCamera(null)

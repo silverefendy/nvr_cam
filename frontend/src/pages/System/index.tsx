@@ -1,7 +1,5 @@
-import React from 'react'
 import { useQuery } from "@tanstack/react-query"
 import { systemApi } from "@/api/system"
-import type { SystemHealth } from "@/types"
 
 export default function SystemPage() {
   const { data: health, isLoading, refetch } = useQuery({
@@ -15,15 +13,6 @@ export default function SystemPage() {
     const hours = Math.floor((seconds % 86400) / 3600)
     const minutes = Math.floor((seconds % 3600) / 60)
     return `${days}d ${hours}h ${minutes}m`
-  }
-
-  const getStatusColor = (status: string) => {
-    switch(status) {
-      case "healthy": return "text-green-400"
-      case "warning": return "text-yellow-400"
-      case "error": return "text-red-400"
-      default: return "text-gray-400"
-    }
   }
 
   const getStatusBadge = (status: string) => {

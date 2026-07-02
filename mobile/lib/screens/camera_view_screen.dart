@@ -28,11 +28,10 @@ class _CameraViewScreenState extends State<CameraViewScreen> {
     await _apiService.init();
     final streamUrl = _apiService.getStreamUrl(widget.camera.id);
 
-    _vlcPlayerController = VlcPlayerController(
-      dataSource: streamUrl,
+    _vlcPlayerController = VlcPlayerController.network(
+      streamUrl,
       autoPlay: true,
-      autoInitialize: true,
-      options: VlcPlayerOptions(
+      options: const VlcPlayerOptions(
         advanced: VlcAdvancedOptions([
           '--rtsp-tcp',
           '--network-caching=300',

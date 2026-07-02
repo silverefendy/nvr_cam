@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
 
 interface DriveAssignment {
@@ -28,12 +28,13 @@ export const StorageForm: React.FC<Props> = ({ onSave }) => {
       if (!response.ok) throw new Error('Failed to fetch storage config')
       return response.json()
     },
-    onSuccess: (data) => {
-      if (data.data?.drive_assignments) {
-        setAssignments(data.data.drive_assignments)
-      }
-    },
   })
+
+  useEffect(() => {
+    if (storageConfig?.data?.drive_assignments) {
+      setAssignments(storageConfig.data.drive_assignments)
+    }
+  }, [storageConfig])
 
   const { data: storageStatus } = useQuery({
     queryKey: ['storage-status'],

@@ -1,7 +1,7 @@
-import React from 'react'
 import { useQuery, useMutation } from "@tanstack/react-query"
 import { storageApi } from "@/api/storage"
-import type { StorageStatus, DriveStatus } from "@/types"
+import type { DriveStatus } from "@/types"
+import { useEffect } from 'react'
 
 export default function StoragePage() {
   const { data: storage, isLoading, refetch } = useQuery({
@@ -12,8 +12,13 @@ export default function StoragePage() {
 
   const cleanupMutation = useMutation({
     mutationFn: storageApi.manualCleanup,
-    onSuccess: () => refetch()
   })
+
+  useEffect(() => {
+    if (cleanupMutation.isSuccess) {
+      refetch()
+    }
+  }, [cleanupMutation.isSuccess, refetch])
 
   const handleCleanup = (drive: string) => {
     if (confirm(`Run cleanup on ${drive}? This will delete old unprotected recordings.`)) {

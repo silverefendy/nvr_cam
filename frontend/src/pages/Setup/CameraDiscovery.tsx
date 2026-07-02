@@ -1,7 +1,8 @@
-import React, { useState } from 'react'
+import { useState } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
+import { useEffect } from 'react'
 
-interface DiscoveredCamera {
+export interface DiscoveredCamera {
   ip: string
   port: number
   manufacturer?: string
@@ -43,16 +44,18 @@ export const CameraDiscovery: React.FC<Props> = ({ onNext, onSkip }) => {
 
   const handleScan = () => {
     setIsScanning(true)
-    discoverMutation.mutate(network || undefined, {
-      onSuccess: (data) => {
-        setIsScanning(false)
-        refetch()
-      },
-      onError: () => {
-        setIsScanning(false)
-      },
-    })
+    discoverMutation.mutate(network || undefined)
   }
+
+  useEffect(() => {
+    if (discoverMutation.isSuccess) {
+      setIsScanning(false)
+      refetch()
+    }
+    if (discoverMutation.isError) {
+      setIsScanning(false)
+    }
+  }, [discoverMutation.isSuccess, discoverMutation.isError, refetch])
 
   const handleToggleCamera = (ip: string) => {
     setSelectedCameras(prev => {

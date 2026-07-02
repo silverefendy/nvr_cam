@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/camera.dart';
 import '../services/api_service.dart';
+import '../providers/shared_prefs_provider.dart';
 import 'camera_view_screen.dart';
 
 class HomeScreen extends ConsumerStatefulWidget {
@@ -162,7 +163,7 @@ class _CameraCard extends StatelessWidget {
                     end: Alignment.bottomCenter,
                     colors: [
                       Colors.transparent,
-                      Colors.black.withOpacity(0.7),
+                      Colors.black.withValues(alpha: 0.7),
                     ],
                   ),
                 ),

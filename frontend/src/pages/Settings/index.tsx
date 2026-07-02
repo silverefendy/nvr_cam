@@ -1,10 +1,9 @@
-import React, { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { NotificationForm } from "@/components/settings/NotificationForm"
 import { StorageForm } from "@/components/settings/StorageForm"
-import { BackupRestore } from "./Settings/BackupRestore"
 
-type TabType = "general" | "notification" | "storage" | "backup"
+type TabType = "general" | "notification" | "storage"
 
 export default function SettingsPage() {
   const [activeTab, setActiveTab] = useState<TabType>("general")
@@ -30,20 +29,24 @@ export default function SettingsPage() {
       if (!response.ok) throw new Error('Failed to update system config')
       return response.json()
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["config-system"] })
-      setMessage({ type: "success", text: "System settings saved successfully" })
-      setTimeout(() => setMessage(null), 3000)
-    },
-    onError: () => {
-      setMessage({ type: "error", text: "Failed to save system settings" })
-      setTimeout(() => setMessage(null), 3000)
-    }
   })
 
   const handleSystemSave = (data: Record<string, any>) => {
     updateSystemMutation.mutate(data)
   }
+
+  // Handle mutation success/error
+  useEffect(() => {
+    if (updateSystemMutation.isSuccess) {
+      queryClient.invalidateQueries({ queryKey: ["config-system"] })
+      setMessage({ type: "success", text: "System settings saved successfully" })
+      setTimeout(() => setMessage(null), 3000)
+    }
+    if (updateSystemMutation.isError) {
+      setMessage({ type: "error", text: "Failed to save system settings" })
+      setTimeout(() => setMessage(null), 3000)
+    }
+  }, [updateSystemMutation.isSuccess, updateSystemMutation.isError, queryClient])
 
   const renderGeneralSettings = () => {
     if (systemLoading) {
@@ -245,19 +248,12 @@ export default function SettingsPage() {
           >
             Storage
           </button>
-          <button
-            onClick={() => setActiveTab("backup")}
-            className={`w-full text-left px-3 py-2 rounded text-sm ${activeTab === "backup" ? "bg-blue-600" : "hover:bg-gray-700"}`}
-          >
-            Backup & Restore
-          </button>
         </div>
 
         <div className="flex-1 bg-gray-900 rounded p-4 overflow-auto">
           {activeTab === "general" && renderGeneralSettings()}
           {activeTab === "notification" && <NotificationForm onSave={() => setMessage({ type: "success", text: "Notification settings saved" })} />}
           {activeTab === "storage" && <StorageForm onSave={() => setMessage({ type: "success", text: "Storage configuration saved" })} />}
-          {activeTab === "backup" && <BackupRestore onSave={() => setMessage({ type: "success", text: "Backup operation completed" })} />}
         </div>
       </div>
     </div>
