@@ -1,117 +1,106 @@
 # HANDOFF DOCUMENT — nvr_cam
 ## Panduan Melanjutkan Development di Sesi Baru
 
-**Terakhir diperbarui:** 2 Juli 2026
+**Terakhir diperbarui:** 2 Juli 2026, 15:00 WIB
+**Sesi:** #003
 **Diverifikasi oleh:** Claude (via MCP GitHub)
 
 ---
 
-## Status Proyek: FASE 2 — Bug Fixes & Integration Testing
+## Status Proyek: FASE 3 — Bug Fix Build (Siap dikerjakan Devin)
 
-Kerangka aplikasi sudah **lengkap dan terimplementasi** di semua layer (Backend, Frontend, Mobile).
-Yang tersisa adalah penyelesaian bug build, end-to-end testing, dan deployment ke server nyata.
+Kerangka aplikasi sudah **lengkap dan terimplementasi** di semua layer.
+Backend 100% selesai. Frontend & Flutter tinggal fix build errors.
+**Prompt siap pakai untuk Devin AI ada di `DEVIN_PROMPT.md`.**
+
+---
+
+## Dokumen Penting di Repo Ini
+
+| File | Isi |
+|------|-----|
+| `README.md` | Setup, quick start, struktur proyek |
+| `PROGRESS.md` | Status per komponen, bug list BUG-001–009, feature backlog, timeline sesi |
+| `HANDOFF.md` | File ini — panduan singkat untuk sesi baru |
+| `DEVIN_PROMPT.md` | Prompt lengkap siap copy-paste ke Devin AI |
+| `Docs/NVR_CAM_Blueprint.md` | Arsitektur teknis lengkap |
 
 ---
 
 ## Yang Sudah SELESAI (Verified dari Kode Aktual)
 
-### Backend (Python/FastAPI) — ✅ Implementasi Lengkap
+### ✅ Backend (Python/FastAPI) — 100% Done
 - `backend/core/` — config, security (JWT+bcrypt), logging, exceptions
-- `backend/db/models/` — User, Camera, Recording, MotionEvent, SystemLog, NotificationLog
+- `backend/db/models/` — 6 model: User, Camera, Recording, MotionEvent, SystemLog, NotificationLog
 - `backend/db/repositories/` — CameraRepo, RecordingRepo, EventRepo, UserRepo
 - `backend/db/migrations/` — Alembic migration sudah ada
-- `backend/api/app.py` — FastAPI factory dengan lifespan (startup: load cameras dari DB/yaml, start RecordingManager, StorageManager, MotionManager)
-- `backend/api/routers/` — auth, cameras, stream, recordings, events, storage, users, settings, system, config, discovery (11 router)
-- `backend/api/websocket.py` — ConnectionManager untuk real-time broadcast
-- `backend/services/recorder/` — ffmpeg_wrapper, camera_recorder, manager (singleton)
-- `backend/services/motion/` — detector (OpenCV background subtraction), manager
-- `backend/services/storage/` — manager (circular delete + monitoring)
-- `backend/services/encoder/` — av1_encoder, scheduler (cron re-encode malam)
-- `backend/services/notifier/` — telegram.py (TelegramNotifier class + fungsi standalone), email.py (EmailNotifier SMTP), dispatcher.py
-- `backend/services/auth/`, `backend/services/discovery/`, `backend/services/health/`
-- `backend/utils/health.py` — get_disk_status(), get_camera_status()
-- `backend/api/routers/config.py` — apply_config() sudah implementasi penuh
-- `backend/tests/integration/test_app_starts.py` — integration test passing
+- `backend/api/app.py` — FastAPI factory dengan lifespan startup/shutdown
+- `backend/api/routers/` — 11 router: auth, cameras, stream, recordings, events, storage, users, settings, system, config, discovery
+- `backend/api/websocket.py` — ConnectionManager real-time
+- `backend/services/` — recorder, motion, storage, encoder, notifier, auth, discovery, health
+- **Python import test: ✅ PASSING**
 
-### Frontend (React/TypeScript) — ✅ Semua Halaman Implemented
-- `src/types/`, `src/api/`, `src/store/`, `src/hooks/` — lengkap
-- `src/components/` — VideoPlayer (HLS.js), CameraGrid, Sidebar
-- `src/pages/Login/` — form login
-- `src/pages/LiveView/` — grid kamera live + WebSocket badge
-- `src/pages/Playback/` — player rekaman dengan date picker
-- `src/pages/Events/` — filter by camera/date, severity, snapshot preview
-- `src/pages/Cameras/` — CRUD kamera, CameraForm, test koneksi RTSP
-- `src/pages/Storage/` — drive status, usage visualization, cleanup
-- `src/pages/Settings/` — tabbed (General, Notifications, Storage, Backup)
-- `src/pages/Users/` — manajemen user + role-based access
-- `src/pages/System/` — dashboard CPU/RAM/disk/uptime/services
+### ✅ Frontend (React/TypeScript) — Semua Halaman Done, Build Gagal
+- 10 halaman: Login, LiveView, Playback, Events, Cameras, Storage, Settings, Users, System, Setup
+- Komponen: VideoPlayer (HLS.js), CameraGrid, Sidebar
+- API modules: auth, cameras, events, recordings, system (client ada, users & storage **MISSING**)
+- **npm install: ✅ SUCCESS** | **npm run build: ❌ 71 TypeScript errors**
 
-### Mobile (Flutter) — ✅ Screens Implemented, Build Pending
-- `mobile/lib/screens/` — login, home, camera_view, playback, events, settings, splash (7 screens)
-- `mobile/lib/models/` — Dart data models
-- `mobile/lib/services/` — API service layer
-- `flutter pub get` — ✅ berhasil (55 packages)
-
-### Config & Infrastructure — ✅ Lengkap
-- `.env.example`, `config/*.yaml`, `scripts/install.sh`, `scripts/update.sh`
-- `scripts/nginx/`, `scripts/systemd/*.service`
+### ✅ Mobile Flutter — Semua Screen Done, Analyze Gagal
+- 7 screens: splash, login, home, camera_view, playback, events, settings
+- `lib/models/`, `lib/services/api_service.dart`, `lib/main.dart` — done
+- **flutter pub get: ✅ SUCCESS** | **flutter analyze: ❌ 7 issues**
 
 ---
 
-## Yang Masih Perlu Diselesaikan (Actual Remaining)
+## Yang Masih Perlu Diselesaikan
 
-### 🔴 Priority 1 — Bug Fix (Blocker)
+### 🔴 Fase 3 — Fix Build (→ Devin AI)
 
-**Frontend TypeScript Build Error (71 errors)**
-- `npm run build` gagal dengan 71 TypeScript errors
-- Issues: missing type definitions, incorrect API imports, type mismatches di System/Users/Storage pages
-- `frontend/tsconfig.json` sudah dibuat, tapi type errors belum semua fix
+**9 bug terdaftar di `PROGRESS.md` dan dijelaskan detail di `DEVIN_PROMPT.md`:**
 
-**Flutter Build Issues (7 issues)**
-- VLC player constructor salah (perlu named constructor)
-- Missing `sharedPreferencesProvider` Riverpod (2 lokasi)
-- Deprecated `withOpacity` API
-- Missing assets directory
+| ID | Kategori | Masalah |
+|----|----------|---------|
+| BUG-001 | Frontend | `frontend/src/api/users.ts` tidak ada |
+| BUG-002 | Frontend | `frontend/src/api/storage.ts` tidak ada |
+| BUG-003 | Frontend | `SystemHealth` field names mismatch di `types/index.ts` |
+| BUG-004 | Frontend | `DriveStatus` / `StorageStatus` field names mismatch |
+| BUG-005 | Frontend | `User.id` bertipe `string`, seharusnya `number` |
+| BUG-006 | Frontend | `systemApi.getHealth` alias tidak ada |
+| BUG-007 | Flutter | `sharedPreferencesProvider` tidak bisa diimport cross-file |
+| BUG-008 | Flutter | VLC Player constructor salah |
+| BUG-009 | Flutter | `withOpacity()` deprecated + assets folder missing |
 
-### 🟡 Priority 2 — Testing & Validation
+### 🟡 Fase 4 — End-to-End Testing
+- Setup PostgreSQL + `alembic upgrade head`
+- Test RecordingManager + kamera RTSP asli
+- Test motion detection → DB → Telegram
+- Test WebSocket real-time
 
-- End-to-end test dengan DB PostgreSQL nyata running
-- Verifikasi Alembic migration (`alembic upgrade head`)
-- Test RecordingManager startup dengan kamera RTSP asli
-- Test motion detection → simpan DB → kirim Telegram
-- Test WebSocket broadcast ke frontend
-
-### 🟢 Priority 3 — Enhancement
-
-- Motion markers di Playback timeline
-- Fullscreen mode VideoPlayer
-- Drag-drop reorder CameraGrid
-- Unit tests backend (belum ada)
+### 🟢 Fase 5 — Enhancement (Backlog)
+- FEAT-001: Export/download rekaman
+- FEAT-002: Motion markers di timeline
+- FEAT-003: Snapshot lightbox
+- FEAT-004: Unit tests backend
+- Detail lengkap di `PROGRESS.md`
 
 ---
 
 ## Cara Melanjutkan di Claude Baru
 
-Paste teks ini di awal sesi:
+Paste ini di awal sesi baru:
 
 ```
-Saya sedang membangun aplikasi NVR CCTV custom bernama nvr_cam.
-Repo GitHub: https://github.com/silverefendy/nvr_cam (bisa diakses via MCP)
+Repo nvr_cam: https://github.com/silverefendy/nvr_cam (akses via MCP GitHub)
 
-Stack: Python FastAPI + PostgreSQL + FFmpeg + OpenCV (backend), React TypeScript Tailwind (frontend), Flutter (mobile).
+Progress per 2 Juli 2026, 15:00 WIB (Sesi #003):
+- Backend: ✅ SELESAI — 11 router, semua services, migrations, Python import passing
+- Frontend: ⚠️ 10 halaman done, npm install OK, npm run build GAGAL (71 TS errors)
+  Bug: BUG-001 s/d BUG-006 — detail di PROGRESS.md, prompt Devin di DEVIN_PROMPT.md
+- Flutter: ⚠️ 7 screens done, flutter pub get OK, flutter analyze GAGAL (7 issues)
+  Bug: BUG-007 s/d BUG-009 — detail di PROGRESS.md, prompt Devin di DEVIN_PROMPT.md
 
-Status saat ini (per 2 Juli 2026):
-- Backend: SELESAI, sudah ada migrations, semua router (11), semua services
-- Frontend: Semua 9 halaman implemented, tapi npm run build GAGAL (71 TypeScript errors)
-- Mobile Flutter: 7 screens done, flutter analyze GAGAL (7 issues — VLC constructor, Riverpod provider, deprecated API)
-
-Yang perlu dilanjutkan: [sebutkan task spesifik]
-
-Contoh task yang bisa dilanjutkan:
-- Fix TypeScript build errors di frontend
-- Fix Flutter build issues (VLC + Riverpod)
-- End-to-end testing dengan database nyata
-- Deploy ke server Ubuntu
+Task sesi ini: [sebutkan]
 ```
 
 ---
@@ -124,7 +113,5 @@ Contoh task yang bisa dilanjutkan:
 | Topologi | Pabrik (30 kamera Dahua) → P2P Ubiquiti → Kantor → ZeroTier → Rumah |
 | Server | Ubuntu Server 24.04 + Intel i5 + 8x HDD WD Purple 4TB (ZFS) |
 | Codec | H.265 dari kamera → re-encode AV1 idle malam |
-| Notifikasi | Telegram Bot + Email SMTP |
+| Notifikasi | Telegram Bot API + Email SMTP |
 | Remote | ZeroTier di Mikrotik kantor + rumah |
-
-Arsitektur lengkap: lihat `Docs/NVR_CAM_Blueprint.md`
