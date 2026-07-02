@@ -1,171 +1,130 @@
 # HANDOFF DOCUMENT — nvr_cam
-## Untuk melanjutkan development di sesi Claude baru
+## Panduan Melanjutkan Development di Sesi Baru
+
+**Terakhir diperbarui:** 2 Juli 2026
+**Diverifikasi oleh:** Claude (via MCP GitHub)
 
 ---
 
-## Status Kerangka: SELESAI (Framework Ready)
+## Status Proyek: FASE 2 — Bug Fixes & Integration Testing
 
-Kerangka aplikasi sudah dibuat lengkap di GitHub repo `silverefendy/nvr_cam`.
-Semua file sudah ada strukturnya. Yang perlu dilakukan selanjutnya adalah **mengisi implementasi** (TODO).
+Kerangka aplikasi sudah **lengkap dan terimplementasi** di semua layer (Backend, Frontend, Mobile).
+Yang tersisa adalah penyelesaian bug build, end-to-end testing, dan deployment ke server nyata.
 
 ---
 
-## Yang Sudah Ada (Completed)
+## Yang Sudah SELESAI (Verified dari Kode Aktual)
 
-### Backend (Python/FastAPI)
-- `backend/core/config.py` — Settings dari .env via Pydantic
-- `backend/core/security.py` — JWT, bcrypt, token generation
-- `backend/core/logging.py` — JSON logger terpusat
-- `backend/core/exceptions.py` — Custom exception classes
-- `backend/db/base.py` — SQLAlchemy async engine
+### Backend (Python/FastAPI) — ✅ Implementasi Lengkap
+- `backend/core/` — config, security (JWT+bcrypt), logging, exceptions
 - `backend/db/models/` — User, Camera, Recording, MotionEvent, SystemLog, NotificationLog
-- `backend/db/repositories/` — CameraRepo, RecordingRepo, EventRepo, UserRepo (dengan BaseRepository)
-- `backend/api/app.py` — FastAPI app factory
-- `backend/api/middleware/auth.py` — JWT dependency + role-based access
-- `backend/api/schemas/` — Pydantic schemas untuk semua endpoint
-- `backend/api/routers/` — auth, cameras, stream, recordings, events, storage, users, settings, system
-- `backend/services/recorder/ffmpeg_wrapper.py` — Semua command FFmpeg
-- `backend/services/recorder/camera_recorder.py` — 1 instance per kamera + auto-reconnect
-- `backend/services/recorder/manager.py` — RecordingManager singleton
-- `backend/services/motion/detector.py` — OpenCV background subtraction per zona
-- `backend/services/storage/manager.py` — Circular delete + monitoring
-- `backend/services/notifier/telegram.py` — Kirim pesan dan foto ke Telegram
-- `backend/services/encoder/av1_encoder.py` — Re-encode ke AV1
+- `backend/db/repositories/` — CameraRepo, RecordingRepo, EventRepo, UserRepo
+- `backend/db/migrations/` — Alembic migration sudah ada
+- `backend/api/app.py` — FastAPI factory dengan lifespan (startup: load cameras dari DB/yaml, start RecordingManager, StorageManager, MotionManager)
+- `backend/api/routers/` — auth, cameras, stream, recordings, events, storage, users, settings, system, config, discovery (11 router)
+- `backend/api/websocket.py` — ConnectionManager untuk real-time broadcast
+- `backend/services/recorder/` — ffmpeg_wrapper, camera_recorder, manager (singleton)
+- `backend/services/motion/` — detector (OpenCV background subtraction), manager
+- `backend/services/storage/` — manager (circular delete + monitoring)
+- `backend/services/encoder/` — av1_encoder, scheduler (cron re-encode malam)
+- `backend/services/notifier/` — telegram.py (TelegramNotifier class + fungsi standalone), email.py (EmailNotifier SMTP), dispatcher.py
+- `backend/services/auth/`, `backend/services/discovery/`, `backend/services/health/`
+- `backend/utils/health.py` — get_disk_status(), get_camera_status()
+- `backend/api/routers/config.py` — apply_config() sudah implementasi penuh
+- `backend/tests/integration/test_app_starts.py` — integration test passing
 
-### Frontend (React/TypeScript)
-- `frontend/src/types/index.ts` — Semua TypeScript interfaces
-- `frontend/src/api/` — client.ts, auth.ts, cameras.ts, recordings.ts, events.ts, system.ts
-- `frontend/src/store/auth.ts` — Zustand auth store + role checking
-- `frontend/src/store/cameras.ts` — Zustand camera + grid store
-- `frontend/src/hooks/useHLSPlayer.ts` — HLS.js integration
-- `frontend/src/hooks/useWebSocket.ts` — Real-time WebSocket
-- `frontend/src/components/camera/VideoPlayer.tsx` — HLS video player component
-- `frontend/src/components/camera/CameraGrid.tsx` — Responsive grid layout
-- `frontend/src/components/layout/Sidebar.tsx` — Navigasi + role filter
-- `frontend/src/pages/Login/` — Form login
-- `frontend/src/pages/LiveView/` — Grid semua kamera live
-- `frontend/src/pages/Playback/` — Player rekaman dengan date picker
-- `frontend/src/App.tsx` — Router + protected routes
+### Frontend (React/TypeScript) — ✅ Semua Halaman Implemented
+- `src/types/`, `src/api/`, `src/store/`, `src/hooks/` — lengkap
+- `src/components/` — VideoPlayer (HLS.js), CameraGrid, Sidebar
+- `src/pages/Login/` — form login
+- `src/pages/LiveView/` — grid kamera live + WebSocket badge
+- `src/pages/Playback/` — player rekaman dengan date picker
+- `src/pages/Events/` — filter by camera/date, severity, snapshot preview
+- `src/pages/Cameras/` — CRUD kamera, CameraForm, test koneksi RTSP
+- `src/pages/Storage/` — drive status, usage visualization, cleanup
+- `src/pages/Settings/` — tabbed (General, Notifications, Storage, Backup)
+- `src/pages/Users/` — manajemen user + role-based access
+- `src/pages/System/` — dashboard CPU/RAM/disk/uptime/services
 
-### Config & Scripts
-- `.env.example` — Template environment variables
-- `config/cameras.yaml` — Template konfigurasi kamera
-- `config/system.yaml` — Parameter sistem
-- `config/storage.yaml` — Mapping drive ke kamera
-- `scripts/install.sh` — Installer otomatis 1 perintah
-- `scripts/update.sh` — Update dari GitHub
-- `scripts/nginx/cctv.conf` — Nginx reverse proxy
-- `scripts/systemd/*.service` — 4 service files
+### Mobile (Flutter) — ✅ Screens Implemented, Build Pending
+- `mobile/lib/screens/` — login, home, camera_view, playback, events, settings, splash (7 screens)
+- `mobile/lib/models/` — Dart data models
+- `mobile/lib/services/` — API service layer
+- `flutter pub get` — ✅ berhasil (55 packages)
+
+### Config & Infrastructure — ✅ Lengkap
+- `.env.example`, `config/*.yaml`, `scripts/install.sh`, `scripts/update.sh`
+- `scripts/nginx/`, `scripts/systemd/*.service`
 
 ---
 
-## Yang Belum Ada (TODO — Perlu Diimplementasi)
+## Yang Masih Perlu Diselesaikan (Actual Remaining)
 
-### Backend Priority 1 (Core)
-1. `backend/db/migrations/` — Alembic migration files (jalankan `alembic revision --autogenerate`)
-2. `backend/services/recorder/manager.py` — Koneksi ke DB untuk load cameras saat startup
-3. `backend/api/app.py` — Lifespan: start RecordingManager, StorageManager saat boot
-4. `backend/api/routers/system.py` — WebSocket broadcast actual events
-5. `backend/api/routers/storage.py` — Implementasi get_storage_status() baca dari disk nyata
-6. `backend/services/motion/detector.py` — Integrasi dengan EventRepository (simpan ke DB)
-7. `backend/services/notifier/telegram.py` — Dipanggil dari motion detector
-8. `scripts/setup_db.py` — Script inisialisasi user admin pertama
+### 🔴 Priority 1 — Bug Fix (Blocker)
 
-### Backend Priority 2
-9. `backend/services/encoder/scheduler.py` — Cron job AV1 encode malam hari
-10. `backend/api/routers/cameras.py` — inject status online/offline dari RecordingManager
-11. `backend/utils/health.py` — System health check (CPU, RAM, disk, service status)
-12. `backend/tests/` — Unit dan integration tests
+**Frontend TypeScript Build Error (71 errors)**
+- `npm run build` gagal dengan 71 TypeScript errors
+- Issues: missing type definitions, incorrect API imports, type mismatches di System/Users/Storage pages
+- `frontend/tsconfig.json` sudah dibuat, tapi type errors belum semua fix
 
-### Frontend Priority 1
-13. `src/pages/Events/index.tsx` — List motion events + filter + snapshot preview
-14. `src/pages/Cameras/index.tsx` — CRUD kamera + test koneksi RTSP
-15. `src/pages/Storage/index.tsx` — Grafik kapasitas per drive
-16. `src/pages/Settings/index.tsx` — Form pengaturan sistem
-17. `src/pages/Users/index.tsx` — Manajemen user + role
-18. `src/pages/System/index.tsx` — Dashboard monitoring CPU/RAM/disk
+**Flutter Build Issues (7 issues)**
+- VLC player constructor salah (perlu named constructor)
+- Missing `sharedPreferencesProvider` Riverpod (2 lokasi)
+- Deprecated `withOpacity` API
+- Missing assets directory
 
-### Frontend Priority 2
-19. Motion markers di Playback timeline
-20. Real-time motion badge overlay di VideoPlayer (via WebSocket)
-21. Fullscreen mode untuk VideoPlayer
-22. Drag-drop reorder kamera di CameraGrid
+### 🟡 Priority 2 — Testing & Validation
 
-### Mobile (Flutter) — Fase Terakhir
-23. `mobile/lib/` — Semua screen Flutter (live view, playback, events)
+- End-to-end test dengan DB PostgreSQL nyata running
+- Verifikasi Alembic migration (`alembic upgrade head`)
+- Test RecordingManager startup dengan kamera RTSP asli
+- Test motion detection → simpan DB → kirim Telegram
+- Test WebSocket broadcast ke frontend
+
+### 🟢 Priority 3 — Enhancement
+
+- Motion markers di Playback timeline
+- Fullscreen mode VideoPlayer
+- Drag-drop reorder CameraGrid
+- Unit tests backend (belum ada)
 
 ---
 
 ## Cara Melanjutkan di Claude Baru
 
-Paste teks berikut di awal sesi Claude baru:
+Paste teks ini di awal sesi:
 
 ```
 Saya sedang membangun aplikasi NVR CCTV custom bernama nvr_cam.
-Repo GitHub: https://github.com/silverefendy/nvr_cam
+Repo GitHub: https://github.com/silverefendy/nvr_cam (bisa diakses via MCP)
 
-Stack: Python FastAPI + PostgreSQL + FFmpeg + OpenCV (backend), React TypeScript Tailwind (frontend).
+Stack: Python FastAPI + PostgreSQL + FFmpeg + OpenCV (backend), React TypeScript Tailwind (frontend), Flutter (mobile).
 
-Yang perlu dilanjutkan: [sebutkan item TODO yang mau dikerjakan]
+Status saat ini (per 2 Juli 2026):
+- Backend: SELESAI, sudah ada migrations, semua router (11), semua services
+- Frontend: Semua 9 halaman implemented, tapi npm run build GAGAL (71 TypeScript errors)
+- Mobile Flutter: 7 screens done, flutter analyze GAGAL (7 issues — VLC constructor, Riverpod provider, deprecated API)
 
-Struktur yang sudah ada:
-- backend/api/routers/ — semua router sudah ada dengan TODO di implementasi
-- backend/services/ — recorder, motion, storage, notifier, encoder sudah ada kerangkanya
-- frontend/src/ — types, api, store, hooks, components, pages sudah ada kerangkanya
+Yang perlu dilanjutkan: [sebutkan task spesifik]
 
-Tolong implementasikan: [nama file / fitur yang mau dikerjakan]
-```
-
----
-
-## Urutan Pengerjaan yang Disarankan
-
-| Prioritas | Task | Estimasi |
-|---|---|---|
-| 1 | Alembic migration + setup DB | 1 hari |
-| 2 | RecordingManager startup di lifespan | 1 hari |
-| 3 | Storage status endpoint (baca disk nyata) | 0.5 hari |
-| 4 | Motion → simpan DB → kirim Telegram | 2 hari |
-| 5 | WebSocket broadcast ke frontend | 1 hari |
-| 6 | Frontend: Events, Cameras, Storage pages | 3 hari |
-| 7 | Frontend: Settings, Users, System pages | 2 hari |
-| 8 | Frontend: motion markers di playback | 1 hari |
-| 9 | AV1 encoder scheduler | 1 hari |
-| 10 | Flutter APK Android | 2 minggu |
-
----
-
-## Environment Setup untuk Developer Baru
-
-```bash
-# Clone repo
-git clone https://github.com/silverefendy/nvr_cam
-cd nvr_cam
-
-# Backend
-python3 -m venv venv && source venv/bin/activate
-pip install -r backend/requirements.txt
-cp .env.example .env
-# Edit .env: isi DB_PASSWORD, JWT_SECRET, TELEGRAM_BOT_TOKEN
-
-# Database (butuh PostgreSQL running)
-alembic upgrade head
-
-# Jalankan API dev mode
-python backend/main.py
-
-# Frontend
-cd frontend && npm install && npm run dev
-# Buka http://localhost:5173
+Contoh task yang bisa dilanjutkan:
+- Fix TypeScript build errors di frontend
+- Fix Flutter build issues (VLC + Riverpod)
+- End-to-end testing dengan database nyata
+- Deploy ke server Ubuntu
 ```
 
 ---
 
 ## Informasi Proyek
 
-- **Topologi:** Pabrik (30 kamera Dahua) → P2P Ubiquiti → Kantor → P2P Ubiquiti → Rumah
-- **Remote:** ZeroTier di Mikrotik kantor + ZeroTier di rumah
-- **Server:** Ubuntu Server 24.04 + Intel i5 + 8x HDD WD Purple 4TB (ZFS)
-- **Codec:** H.265 dari kamera, re-encode AV1 saat idle malam
-- **Notifikasi:** Telegram Bot (gratis)
-- **Repo:** https://github.com/silverefendy/nvr_cam
+| Item | Detail |
+|---|---|
+| Repo | https://github.com/silverefendy/nvr_cam |
+| Topologi | Pabrik (30 kamera Dahua) → P2P Ubiquiti → Kantor → ZeroTier → Rumah |
+| Server | Ubuntu Server 24.04 + Intel i5 + 8x HDD WD Purple 4TB (ZFS) |
+| Codec | H.265 dari kamera → re-encode AV1 idle malam |
+| Notifikasi | Telegram Bot + Email SMTP |
+| Remote | ZeroTier di Mikrotik kantor + rumah |
+
+Arsitektur lengkap: lihat `Docs/NVR_CAM_Blueprint.md`
