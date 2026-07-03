@@ -1,19 +1,20 @@
 # HANDOFF DOCUMENT — nvr_cam
 ## Panduan Melanjutkan Development di Sesi Baru
 
-**Terakhir diperbarui:** 3 Juli 2026, 13:00 WIB
-**Sesi Terakhir:** #004 (Devin AI)
-**Diverifikasi oleh:** Claude (via MCP GitHub)
+**Terakhir diperbarui:** 3 Juli 2026, 14:30 WIB
+**Sesi Terakhir:** #005 (Claude — Setup CI/CD Lokal)
+**Repo:** https://github.com/silverefendy/nvr_cam
 
 ---
 
-## Status Proyek: FASE 4 — End-to-End Testing & Deployment
+## Status Proyek: FASE 4 — Testing Lokal & Deployment
 
 | Layer | Status | Catatan |
 |-------|--------|---------|
 | Backend | ✅ **SELESAI** | Python import passing, semua services & routers |
 | Frontend | ✅ **SELESAI** | `npm run build` SUCCESS — 0 errors |
-| Mobile Flutter | 🟡 **Code Fixed** | Code sudah difix Devin, tapi `flutter analyze` belum bisa diverifikasi (Flutter CLI tidak ada di mesin Devin) |
+| Mobile Flutter | 🟡 **Code Fixed** | `flutter analyze` belum diverifikasi (BUG-013) |
+| CI/CD Lokal | ✅ **BARU** | Docker Compose dev, git hook deploy, Makefile, test script |
 
 ---
 
@@ -22,50 +23,102 @@
 | File | Isi |
 |------|-----|
 | `README.md` | Setup, quick start, struktur proyek |
-| `PROGRESS.md` | **Status lengkap** — timeline sesi, bug list BUG-001–013, feature backlog |
-| `HANDOFF.md` | File ini — panduan singkat untuk sambung di sesi baru |
-| `DEVIN_PROMPT.md` | Prompt untuk Devin AI (sudah terpakai di #004, bisa diupdate untuk task berikutnya) |
+| `PROGRESS.md` | Status lengkap — timeline sesi, bug list, feature backlog |
+| `HANDOFF.md` | File ini — panduan singkat untuk sesi baru |
+| `DEVIN_PROMPT.md` | Prompt untuk Devin AI (update jika ada task baru) |
 | `Docs/NVR_CAM_Blueprint.md` | Arsitektur teknis lengkap |
 
 ---
 
-## Ringkasan Bug
+## CI/CD Lokal — File yang Sudah Ada (Sesi #005)
 
-| Kategori | Total | Fixed | Pending |
-|----------|-------|-------|---------|
-| Frontend TypeScript | 9 bug | ✅ 9 (oleh Devin #004) | 0 |
-| Flutter | 4 bug | ✅ 3 code fixes (Devin) | ⏳ 1 (verify analyze) |
-| **Total** | **13** | **12** | **1** |
+```
+nvr_cam/
+├── docker-compose.dev.yml       ← Stack lokal: DB + Backend + Frontend
+├── Dockerfile.backend           ← Docker image backend Python
+├── frontend/
+│   ├── Dockerfile.frontend.dev  ← Dev server hot-reload
+│   └── Dockerfile.frontend.prod ← Build production
+├── Makefile                     ← Shortcut semua perintah
+├── .env.example                 ← Template env vars (lengkap)
+└── scripts/
+    ├── local-test.sh            ← Test suite lokal (backend + frontend + flutter)
+    ├── setup-local.sh           ← Setup awal dari nol (1x saja)
+    └── hooks/post-receive       ← Git hook auto-deploy ke server
+```
 
-**Satu-satunya yang pending:** BUG-013 — `flutter analyze` & `flutter build apk` belum diverifikasi karena Flutter CLI tidak terpasang di mesin Devin. Perlu dilakukan di mesin yang ada Flutter-nya.
+### Cara Pakai (Quick Reference)
+
+```bash
+# PERTAMA KALI — setup dari nol
+bash scripts/setup-local.sh
+
+# Sehari-hari
+make dev          # jalankan stack lokal
+make test         # test sebelum deploy
+make deploy       # push ke server (otomatis test dulu)
+make logs         # lihat log
+make stop         # stop stack
+```
 
 ---
 
-## Yang Perlu Dilakukan Berikutnya
+## Setup Git Hook di Server (1x saja)
 
-### 🟡 Segera (Blocker untuk Mobile)
-- [ ] Jalankan `flutter analyze` di mesin dengan Flutter CLI installed
-- [ ] Fix jika ada issue yang tersisa
-- [ ] `flutter build apk --release` → hasilkan APK
+```bash
+# Di SERVER Ubuntu:
+sudo mkdir -p /opt/nvr_cam.git
+sudo git init --bare /opt/nvr_cam.git
+sudo cp /opt/nvr_cam/scripts/hooks/post-receive /opt/nvr_cam.git/hooks/
+sudo chmod +x /opt/nvr_cam.git/hooks/post-receive
 
-### 🔲 Fase 4 — Testing
-- [ ] Setup PostgreSQL lokal + jalankan `alembic upgrade head`
-- [ ] Test backend: `python backend/main.py` → akses `http://localhost:8000/api/docs`
-- [ ] Test frontend connect ke backend (CORS, JWT auth flow)
-- [ ] Test dengan kamera RTSP asli (RecordingManager, motion detection)
-- [ ] Test Telegram notifikasi (motion event → alert HP)
-- [ ] Test WebSocket real-time di LiveView page
+# Di PC LOKAL kamu:
+git remote add server ssh://USER@IP-SERVER/opt/nvr_cam.git
 
-### 🔲 Fase 5 — Deployment
-- [ ] Jalankan `scripts/install.sh` di server Ubuntu
-- [ ] Setup `.env` dengan credentials produksi
-- [ ] Verifikasi 4 systemd services: `nvr-api`, `nvr-recorder`, `nvr-motion`, `nvr-encoder`
-- [ ] Test akses dari ZeroTier (kantor ↔ rumah)
+# Deploy ke server (setelah ini):
+make deploy
+# atau manual:
+git push server main
+```
+
+---
+
+## Yang Masih Perlu Dilakukan
+
+### 🟡 BUG-013 — Flutter verify (Pending)
+Jalankan di mesin yang ada Flutter CLI-nya:
+```bash
+cd mobile
+flutter analyze    # harus 0 issues
+flutter build apk --release
+```
+
+### 🔲 Fase 4 — End-to-End Testing
+```bash
+make dev           # jalankan stack lokal
+make test          # verifikasi semua komponen
+# Lalu test manual:
+# - Buka http://localhost:5173 → login admin/cctv1234
+# - Test tambah kamera RTSP
+# - Test motion detection → Telegram alert
+```
+
+### 🔲 Fase 5 — Deployment Production
+```bash
+# Di server Ubuntu (1x install):
+bash scripts/install.sh
+
+# Setup git remote di PC lokal:
+git remote add server ssh://USER@IP-SERVER/opt/nvr_cam.git
+
+# Deploy:
+make deploy
+```
 
 ### 🔲 Fase 6 — Enhancement
 - FEAT-001: Export/download rekaman
-- FEAT-002: Motion markers di timeline playback
-- FEAT-003: Snapshot lightbox di Events
+- FEAT-002: Motion markers di timeline
+- FEAT-003: Snapshot lightbox
 - Detail: lihat `PROGRESS.md`
 
 ---
@@ -75,12 +128,13 @@
 ```
 Repo nvr_cam: https://github.com/silverefendy/nvr_cam (akses via MCP GitHub)
 
-Progress per 3 Juli 2026, 13:00 WIB:
+Progress per 3 Juli 2026, 14:30 WIB (Sesi #005 selesai):
 - Backend:  ✅ SELESAI
 - Frontend: ✅ SELESAI (npm run build — 0 errors)
 - Flutter:  🟡 Code fixed, flutter analyze BELUM diverifikasi (BUG-013)
+- CI/CD:    ✅ SELESAI — docker-compose dev + Makefile + git hook deploy + local-test.sh
 
-Detail semua bug & status: lihat PROGRESS.md
+Cara jalankan lokal: bash scripts/setup-local.sh → make dev
 Next task: [sebutkan]
 ```
 
@@ -95,3 +149,4 @@ Next task: [sebutkan]
 | Kamera | 30x Dahua H.265 RTSP |
 | Jaringan | P2P Ubiquiti pabrik↔kantor, ZeroTier kantor↔rumah |
 | Notifikasi | Telegram Bot + SMTP email |
+| Login default | admin / cctv1234 |
