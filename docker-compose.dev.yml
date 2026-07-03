@@ -1,0 +1,70 @@
+# docker-compose.dev.yml
+# Untuk development & testing LOKAL di PC/laptop
+# Tidak butuh GitHub Actions — jalankan: make dev
+#
+# Yang dijalankan:
+#   - PostgreSQL 16
+#   - Redis (session cache)
+#   - Backend FastAPI (hot-reload)
+#   - Frontend Vite (hot-reload)
+#
+# Kamera RTSP tetap dari kamera fisik / RTSP simulator
+
+services:
+
+  db:
+    image: postgres:16-alpine
+    container_name: nvr_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: nvr_cam
+      POSTGRES_USER: nvr_user
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-devpassword123}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nvr_user -d nvr_cam"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: nvr_backend
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://nvr_user:${DB_PASSWORD:-devpassword123}@db:5432/nvr_cam
+      DEBUG: "true"
+    volumes:
+      - ./backend:/app/backend          # hot-reload: edit kode langsung reload
+      - ./config:/app/config
+      - nvr_recordings:/mnt/recordings  # simulasi folder rekaman
+    ports:
+      - "8000:8000"
+    command: uvicorn backend.api.app:app --host 0.0.0.0 --port 8000 --reload
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.frontend.dev
+    container_name: nvr_frontend
+    restart: unless-stopped
+    volumes:
+      - ./frontend/src:/app/src         # hot-reload: edit komponen langsung update
+    ports:
+      - "5173:5173"
+    environment:
+      VITE_API_URL: http://localhost:8000/api/v1
+      VITE_WS_URL: ws://localhost:8000/ws
+
+volumes:
+  pgdata:
+  nvr_recordings:

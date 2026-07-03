@@ -1,0 +1,60 @@
+#!/bin/bash
+# =============================================================
+# Git Hook: post-receive
+# Auto-deploy ke server saat kamu push dari PC ke server langsung
+#
+# CARA SETUP (di server Ubuntu, 1x saja):
+#
+#   sudo mkdir -p /opt/nvr_cam.git
+#   sudo git init --bare /opt/nvr_cam.git
+#   sudo cp scripts/hooks/post-receive /opt/nvr_cam.git/hooks/post-receive
+#   sudo chmod +x /opt/nvr_cam.git/hooks/post-receive
+#
+# Di PC lokal kamu:
+#   git remote add server ssh://user@IP-SERVER/opt/nvr_cam.git
+#
+# Deploy cukup:
+#   git push server main
+#
+# =============================================================
+set -euo pipefail
+
+DEPLOY_DIR="/opt/nvr_cam"
+GIT_REPO="/opt/nvr_cam.git"
+LOG="/var/log/nvr_deploy.log"
+
+echo "" >> $LOG
+echo "====================================" >> $LOG
+echo "[$(date '+%Y-%m-%d %H:%M:%S')] Deploy dimulai" >> $LOG
+
+# Checkout kode terbaru ke deploy directory
+export GIT_WORK_TREE=$DEPLOY_DIR
+export GIT_DIR=$GIT_REPO
+git checkout -f main >> $LOG 2>&1
+
+cd $DEPLOY_DIR
+
+# ---- Backend ----
+echo "[$(date '+%H:%M:%S')] Update Python deps..." >> $LOG
+./venv/bin/pip install -q -r backend/requirements.txt >> $LOG 2>&1
+
+echo "[$(date '+%H:%M:%S')] Jalankan migrasi DB..." >> $LOG
+./venv/bin/alembic upgrade head >> $LOG 2>&1
+
+# ---- Frontend ----
+echo "[$(date '+%H:%M:%S')] Build frontend..." >> $LOG
+cd frontend
+npm install -q >> $LOG 2>&1
+npm run build >> $LOG 2>&1
+cd ..
+
+# Salin hasil build ke folder Nginx
+rm -rf /var/www/nvr_cam/*
+cp -r frontend/dist/* /var/www/nvr_cam/
+
+# ---- Restart services ----
+echo "[$(date '+%H:%M:%S')] Restart services..." >> $LOG
+systemctl restart nvr-api nvr-recorder nvr-motion nvr-encoder >> $LOG 2>&1
+
+echo "[$(date '+%H:%M:%S')] ✅ Deploy selesai!" >> $LOG
+echo "Lihat log: tail -f $LOG"
