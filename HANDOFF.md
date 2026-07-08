@@ -1,9 +1,38 @@
 # HANDOFF DOCUMENT — nvr_cam
 ## Panduan Melanjutkan Development di Sesi Baru
 
-**Terakhir diperbarui:** 9 Juli 2026, 08:00 WIB
-**Sesi Terakhir:** #007 (Claude — Fix Native Install & Cleanup)
+**Terakhir diperbarui:** 9 Juli 2026, 09:00 WIB
+**Sesi Terakhir:** #007 (Claude — Fix Native Install & Cleanup + FEATURES.md)
 **Repo:** https://github.com/silverefendy/nvr_cam
+
+---
+
+## ⚡ MULAI CEPAT — Jika Token Habis / Ganti Claude Baru
+
+Jika sesi Claude sebelumnya terputus atau token habis, copy-paste teks ini ke Claude baru:
+
+```
+Repo nvr_cam: https://github.com/silverefendy/nvr_cam
+Akses repo via MCP GitHub (tool: github:get_file_contents, dll).
+
+Tolong baca file-file ini secara berurutan sebelum mulai:
+1. HANDOFF.md       → status proyek + panduan ini
+2. PROGRESS.md      → timeline sesi, daftar bug lengkap
+3. FEATURES.md      → daftar lengkap semua fitur (sudah ada + backlog)
+
+Progress per 9 Juli 2026, 09:00 WIB (Sesi #007 selesai):
+- Backend:     ✅ SELESAI — 11 router, semua services, Python import passing
+- Frontend:    ✅ SELESAI — npm run build SUCCESS (0 errors)
+- Flutter:     🟡 Code fixed, flutter analyze BELUM diverifikasi (BUG-013)
+- Deploy:      ✅ scripts/install.sh SIAP untuk native Ubuntu (no Docker)
+- Fitur:       79/123 fitur selesai (64%) — lihat FEATURES.md untuk detail
+
+Stack: FastAPI (Python 3.12) + PostgreSQL 16 + React/Vite (TypeScript) + Flutter
+Server: Ubuntu Server 24.04, Intel i5, 8x WD Purple 4TB ZFS
+Kamera: 30x Dahua H.265 RTSP
+
+Next task: [sebutkan apa yang mau dikerjakan]
+```
 
 ---
 
@@ -20,12 +49,13 @@
 
 ## Dokumen Referensi
 
-| File | Isi |
-|------|-----|
-| `README.md` | Setup, quick start, struktur proyek |
-| `PROGRESS.md` | Status lengkap — timeline sesi, daftar bug, feature backlog |
-| `HANDOFF.md` | File ini — panduan singkat untuk sesi baru |
-| `Docs/NVR_CAM_Blueprint.md` | Arsitektur teknis lengkap |
+| File | Isi | Kapan Dibaca |
+|------|-----|--------------|
+| `HANDOFF.md` | File ini — panduan singkat & template sesi baru | Selalu, pertama kali |
+| `PROGRESS.md` | Timeline sesi, daftar bug lengkap, next steps | Saat mau cek history atau bug |
+| `FEATURES.md` | Laporan lengkap semua fitur + backlog prioritas | Saat mau tambah / cek fitur |
+| `README.md` | Setup, quick start, struktur proyek | Saat setup awal |
+| `Docs/NVR_CAM_Blueprint.md` | Arsitektur teknis lengkap | Saat perlu pahami desain sistem |
 
 ---
 
@@ -67,13 +97,11 @@ RECORDINGS_BASE_PATH=/mnt/recordings   # sesuaikan ke ZFS pool
 ### Cek Status Services
 
 ```bash
-systemctl status nvr-api
-systemctl status nvr-recorder
-systemctl status nvr-motion
-systemctl status nvr-encoder
+systemctl status nvr-api nvr-recorder nvr-motion nvr-encoder
 
-# Lihat log real-time:
+# Log real-time:
 journalctl -u nvr-api -f
+journalctl -u nvr-recorder -f
 ```
 
 ---
@@ -81,7 +109,6 @@ journalctl -u nvr-api -f
 ## Yang Masih Perlu Dilakukan
 
 ### 🟡 BUG-013 — Flutter verify (Pending)
-Jalankan di mesin yang ada Flutter CLI-nya:
 ```bash
 cd mobile
 flutter analyze    # harus 0 issues
@@ -90,54 +117,43 @@ flutter build apk --release
 
 ### 🔲 Deploy ke Production
 ```bash
-# Di server Ubuntu 24.04:
 sudo bash scripts/install.sh
-
-# Edit .env:
 nano /opt/nvr_cam/.env
-
-# Restart services setelah edit .env:
 systemctl restart nvr-api nvr-recorder nvr-motion nvr-encoder
 ```
+Buka `http://IP-SERVER` → login `admin / nvr1234`
 
-### 🔲 End-to-End Test
-Setelah deploy:
-- Buka `http://IP-SERVER` → login `admin / nvr1234`
-- Tambah kamera RTSP dari Dahua
-- Verifikasi live stream, rekaman, motion alert Telegram
-
-### 🔲 Feature Enhancements
-- FEAT-001: Export/download rekaman
-- FEAT-002: Motion markers di timeline
-- FEAT-003: Snapshot lightbox
-- Detail: lihat `PROGRESS.md`
+### 🔲 Feature Priorities
+Lihat `FEATURES.md` bagian "Backlog Prioritas Tinggi" untuk daftar lengkap.
+Ringkasan 3 teratas:
+- **D-09** — Download rekaman ke lokal
+- **E-07** — Snapshot lightbox (klik foto jadi besar)
+- **E-10 / E-11** — Sensitivitas motion + cooldown notifikasi
 
 ---
 
-## Template untuk Sesi Baru (Copy-Paste)
+## Panduan Update Dokumen Saat Ada Fitur Baru
 
-```
-Repo nvr_cam: https://github.com/silverefendy/nvr_cam (akses via MCP GitHub)
+Setiap sesi yang menambah / menyelesaikan fitur, update **kedua file ini**:
 
-Progress per 9 Juli 2026, 08:00 WIB (Sesi #007 selesai):
-- Backend:     ✅ SELESAI — 11 router, semua services, Python import passing
-- Frontend:    ✅ SELESAI — npm run build SUCCESS (0 errors)
-- Flutter:     🟡 Code fixed, flutter analyze BELUM diverifikasi (BUG-013)
-- Deploy:      ✅ scripts/install.sh SIAP untuk native Ubuntu (no Docker)
-
-Next task: [sebutkan]
-```
+| File | Yang Diupdate |
+|------|--------------|
+| `FEATURES.md` | Status fitur ✅, nomor sesi, statistik total |
+| `PROGRESS.md` | Timeline sesi baru, next steps |
+| `HANDOFF.md` | Tanggal + sesi terakhir, template copy-paste |
 
 ---
 
 ## Informasi Proyek
 
 | Item | Detail |
-|---|---|
+|------|--------|
 | Repo | https://github.com/silverefendy/nvr_cam |
 | Server | Ubuntu Server 24.04 + Intel i5 + 8x WD Purple 4TB ZFS |
 | Kamera | 30x Dahua H.265 RTSP |
+| Jaringan | P2P Ubiquiti pabrik↔kantor, ZeroTier kantor↔rumah |
 | Install dir | `/opt/nvr_cam` |
 | Runtime dir | `/var/lib/nvr_cam/` (HLS + snapshots) |
 | Notifikasi | Telegram Bot + SMTP email |
-| Login default | admin / nvr1234 |
+| Login default | `admin / nvr1234` |
+| Progress fitur | 79/123 (64%) — detail di `FEATURES.md` |
