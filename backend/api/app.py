@@ -133,7 +133,8 @@ async def lifespan(app: FastAPI):
             logger.info("Motion manager stopped")
         
         # Close DB connections
-        await AsyncSessionLocal.close_all()
+        from backend.db.base import engine
+        await engine.dispose()
         logger.info("Database connections closed")
         
         logger.info("NVR API service shut down successfully")

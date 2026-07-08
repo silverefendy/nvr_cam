@@ -10,9 +10,9 @@ class Settings(BaseSettings):
     # Database
     db_host: str = "localhost"
     db_port: int = 5432
-    db_name: str = "cctv_db"
-    db_user: str = "cctv_user"
-    db_password: str = "changeme"
+    db_name: str = "nvr_cam"
+    db_user: str = "nvr_user"
+    db_password: str = "devpassword123"
 
     # JWT
     jwt_secret: str = "changeme-secret-key-for-development-only"

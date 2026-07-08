@@ -21,8 +21,8 @@ services:
 
   api:
     build:
-      context: ./backend
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: Dockerfile.backend
     container_name: cctv_api
     env_file: .env
     volumes:
