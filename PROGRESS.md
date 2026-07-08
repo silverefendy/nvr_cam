@@ -4,15 +4,18 @@
 **Dibuat:** 2 Juli 2026, 13:00 WIB
 **Diperbarui:** 8 Juli 2026, 20:30 WIB
 **Sesi Terakhir:** #006 (Cascade AI — Fix Docker & Config Bugs)
-**Repo:** https://github.com/silverefendy/nvr_cam
+**Repo:** https://github.com/silverefendy\nvr_cam
 
 ---
 
 ## Ringkasan Eksekutif
 
-Aplikasi NVR CCTV custom untuk 30 kamera Dahua sudah melewati **Fase 1–3**.
+Aplikasi NVR CCTV custom untuk 30 kamera Dahua sudah melewati **Fase 1–4 (partial)**.
 Backend, Frontend, dan Mobile semuanya sudah beres secara kode.
-**Fase berikutnya: Fase 4 — End-to-End Testing + Deployment ke server nyata.**
+Sesi #005 melakukan **audit menyeluruh** dan menemukan **6 bug kritis** yang akan menyebabkan
+aplikasi gagal dijalankan. Semua bug kritis sudah diidentifikasi dan perlu di-fix sebelum deployment.
+
+**Fase berikutnya: Fix 6 Bug Kritis → End-to-End Testing → Deployment ke server nyata.**
 
 ---
 
@@ -64,14 +67,6 @@ Backend, Frontend, dan Mobile semuanya sudah beres secara kode.
 | Users | ✅ Done | CRUD + role-based |
 | System | ✅ Done | CPU/RAM/disk/uptime/services |
 | Setup/Discovery | ✅ Done | index.tsx + CameraDiscovery.tsx |
-| API: `users.ts` | ✅ Fixed (Devin) | Dibuat dari awal |
-| API: `storage.ts` | ✅ Fixed (Devin) | Dibuat dari awal |
-| API: `system.ts` | ✅ Fixed (Devin) | Tambah alias `getHealth` |
-| `types/index.ts` | ✅ Fixed (Devin) | `SystemHealth`, `DriveStatus`, `StorageStatus`, `User` sinkron |
-| `index.html` | ✅ Fixed (Devin) | Entry point Vite dibuat |
-| TanStack Query | ✅ Fixed (Devin) | `onSuccess` deprecated → `useEffect` |
-| Unused imports | ✅ Fixed (Devin) | React imports dibersihkan |
-| **npm install** | ✅ **SUCCESS** | 304 packages |
 | **npm run build** | ✅ **SUCCESS** | **0 errors** |
 
 ### 🟡 Mobile Flutter — Code Fixed, Belum Diverifikasi
@@ -79,18 +74,13 @@ Backend, Frontend, dan Mobile semuanya sudah beres secara kode.
 | Item | Status | Catatan |
 |------|--------|---------|
 | 7 screens (splash, login, home, camera_view, playback, events, settings) | ✅ Done | — |
-| `lib/providers/shared_prefs_provider.dart` | ✅ Fixed (Devin) | Diekstrak dari main.dart |
-| `lib/main.dart` | ✅ Fixed (Devin) | Import provider baru |
-| VLC Player constructor | ✅ Fixed (Devin) | `.network()` untuk v7.4.0 |
-| `withOpacity()` deprecated | ✅ Fixed (Devin) | → `withValues(alpha:)` |
-| `assets/images/.gitkeep` | ✅ Fixed (Devin) | Folder dibuat |
 | `flutter pub get` | ✅ **SUCCESS** | 55 packages |
-| `flutter analyze` | ⏳ **Belum diverifikasi** | Flutter CLI tidak terpasang di mesin Devin |
+| `flutter analyze` | ⏳ **Belum diverifikasi** | BUG-013 — Flutter CLI tidak terpasang di mesin Devin |
 | `flutter build apk` | ⏳ **Belum** | Tunggu verify analyze dulu |
 
 ---
 
-## Daftar Bug & Status
+## Daftar Bug Lengkap
 
 | ID | Masalah | Status | Fixed di Sesi | Commit |
 |----|---------|--------|---------------|--------|
@@ -160,7 +150,7 @@ Backend, Frontend, dan Mobile semuanya sudah beres secara kode.
 
 ---
 
-## Template Sesi Baru (Copy-Paste ke Claude/Devin)
+## Template Sesi Baru (Copy-Paste ke Claude)
 
 ```
 Repo nvr_cam: https://github.com/silverefendy/nvr_cam (akses via MCP GitHub)
@@ -190,3 +180,4 @@ Next task: [sebutkan — contoh: verify flutter analyze, atau deploy ke server, 
 | Codec archive | Re-encode AV1 saat idle malam |
 | Notifikasi | Telegram Bot API + Email SMTP |
 | Remote access | ZeroTier di Mikrotik kantor + router rumah |
+| Login default | admin / cctv1234 |
