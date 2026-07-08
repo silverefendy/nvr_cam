@@ -1,84 +1,79 @@
 # HANDOFF DOCUMENT — nvr_cam
 ## Panduan Melanjutkan Development di Sesi Baru
 
-**Terakhir diperbarui:** 3 Juli 2026, 14:30 WIB
-**Sesi Terakhir:** #005 (Claude — Setup CI/CD Lokal)
+**Terakhir diperbarui:** 9 Juli 2026, 08:00 WIB
+**Sesi Terakhir:** #007 (Claude — Fix Native Install & Cleanup)
 **Repo:** https://github.com/silverefendy/nvr_cam
 
 ---
 
-## Status Proyek: FASE 4 — Testing Lokal & Deployment
+## Status Proyek Saat Ini
 
 | Layer | Status | Catatan |
 |-------|--------|---------|
 | Backend | ✅ **SELESAI** | Python import passing, semua services & routers |
 | Frontend | ✅ **SELESAI** | `npm run build` SUCCESS — 0 errors |
 | Mobile Flutter | 🟡 **Code Fixed** | `flutter analyze` belum diverifikasi (BUG-013) |
-| CI/CD Lokal | ✅ **BARU** | Docker Compose dev, git hook deploy, Makefile, test script |
+| Deploy Scripts | ✅ **SIAP** | `scripts/install.sh` sudah difix untuk native Ubuntu |
 
 ---
 
-## Dokumen Penting
+## Dokumen Referensi
 
 | File | Isi |
 |------|-----|
 | `README.md` | Setup, quick start, struktur proyek |
-| `PROGRESS.md` | Status lengkap — timeline sesi, bug list, feature backlog |
+| `PROGRESS.md` | Status lengkap — timeline sesi, daftar bug, feature backlog |
 | `HANDOFF.md` | File ini — panduan singkat untuk sesi baru |
-| `DEVIN_PROMPT.md` | Prompt untuk Devin AI (update jika ada task baru) |
 | `Docs/NVR_CAM_Blueprint.md` | Arsitektur teknis lengkap |
 
 ---
 
-## CI/CD Lokal — File yang Sudah Ada (Sesi #005)
+## Deployment Native Ubuntu (Tanpa Docker)
 
-```
-nvr_cam/
-├── docker-compose.dev.yml       ← Stack lokal: DB + Backend + Frontend
-├── Dockerfile.backend           ← Docker image backend Python
-├── frontend/
-│   ├── Dockerfile.frontend.dev  ← Dev server hot-reload
-│   └── Dockerfile.frontend.prod ← Build production
-├── Makefile                     ← Shortcut semua perintah
-├── .env.example                 ← Template env vars (lengkap)
-└── scripts/
-    ├── local-test.sh            ← Test suite lokal (backend + frontend + flutter)
-    ├── setup-local.sh           ← Setup awal dari nol (1x saja)
-    └── hooks/post-receive       ← Git hook auto-deploy ke server
-```
-
-### Cara Pakai (Quick Reference)
+Repo ini menggunakan **native install** via `scripts/install.sh` — **tidak perlu Docker**.
 
 ```bash
-# PERTAMA KALI — setup dari nol
-bash scripts/setup-local.sh
-
-# Sehari-hari
-make dev          # jalankan stack lokal
-make test         # test sebelum deploy
-make deploy       # push ke server (otomatis test dulu)
-make logs         # lihat log
-make stop         # stop stack
+# Di server Ubuntu 24.04 (jalankan sebagai root):
+git clone https://github.com/silverefendy/nvr_cam /opt/nvr_cam
+cd /opt/nvr_cam
+sudo bash scripts/install.sh
 ```
 
----
+Script ini otomatis:
+- Install `ffmpeg`, `python3`, `postgresql`, `nginx`, `nodejs` via `apt`
+- Setup virtualenv Python + install `requirements.txt`
+- Buat database `nvr_cam` + user `nvr_user` di PostgreSQL
+- Jalankan `alembic upgrade head`
+- Build frontend React
+- Register 4 systemd services (`nvr-api`, `nvr-recorder`, `nvr-motion`, `nvr-encoder`)
+- Setup Nginx
 
-## Setup Git Hook di Server (1x saja)
+### Setelah Install — Edit `.env`
 
 ```bash
-# Di SERVER Ubuntu:
-sudo mkdir -p /opt/nvr_cam.git
-sudo git init --bare /opt/nvr_cam.git
-sudo cp /opt/nvr_cam/scripts/hooks/post-receive /opt/nvr_cam.git/hooks/
-sudo chmod +x /opt/nvr_cam.git/hooks/post-receive
+nano /opt/nvr_cam/.env
+```
 
-# Di PC LOKAL kamu:
-git remote add server ssh://USER@IP-SERVER/opt/nvr_cam.git
+Wajib diisi:
+```env
+DB_PASSWORD=password_kuat_kamu
+JWT_SECRET=string_random_minimal_32_karakter
+TELEGRAM_BOT_TOKEN=token_dari_botfather
+TELEGRAM_CHAT_ID=chat_id_kamu
+RECORDINGS_BASE_PATH=/mnt/recordings   # sesuaikan ke ZFS pool
+```
 
-# Deploy ke server (setelah ini):
-make deploy
-# atau manual:
-git push server main
+### Cek Status Services
+
+```bash
+systemctl status nvr-api
+systemctl status nvr-recorder
+systemctl status nvr-motion
+systemctl status nvr-encoder
+
+# Lihat log real-time:
+journalctl -u nvr-api -f
 ```
 
 ---
@@ -93,29 +88,25 @@ flutter analyze    # harus 0 issues
 flutter build apk --release
 ```
 
-### 🔲 Fase 4 — End-to-End Testing
+### 🔲 Deploy ke Production
 ```bash
-make dev           # jalankan stack lokal
-make test          # verifikasi semua komponen
-# Lalu test manual:
-# - Buka http://localhost:5173 → login admin/cctv1234
-# - Test tambah kamera RTSP
-# - Test motion detection → Telegram alert
+# Di server Ubuntu 24.04:
+sudo bash scripts/install.sh
+
+# Edit .env:
+nano /opt/nvr_cam/.env
+
+# Restart services setelah edit .env:
+systemctl restart nvr-api nvr-recorder nvr-motion nvr-encoder
 ```
 
-### 🔲 Fase 5 — Deployment Production
-```bash
-# Di server Ubuntu (1x install):
-bash scripts/install.sh
+### 🔲 End-to-End Test
+Setelah deploy:
+- Buka `http://IP-SERVER` → login `admin / nvr1234`
+- Tambah kamera RTSP dari Dahua
+- Verifikasi live stream, rekaman, motion alert Telegram
 
-# Setup git remote di PC lokal:
-git remote add server ssh://USER@IP-SERVER/opt/nvr_cam.git
-
-# Deploy:
-make deploy
-```
-
-### 🔲 Fase 6 — Enhancement
+### 🔲 Feature Enhancements
 - FEAT-001: Export/download rekaman
 - FEAT-002: Motion markers di timeline
 - FEAT-003: Snapshot lightbox
@@ -128,13 +119,12 @@ make deploy
 ```
 Repo nvr_cam: https://github.com/silverefendy/nvr_cam (akses via MCP GitHub)
 
-Progress per 3 Juli 2026, 14:30 WIB (Sesi #005 selesai):
-- Backend:  ✅ SELESAI
-- Frontend: ✅ SELESAI (npm run build — 0 errors)
-- Flutter:  🟡 Code fixed, flutter analyze BELUM diverifikasi (BUG-013)
-- CI/CD:    ✅ SELESAI — docker-compose dev + Makefile + git hook deploy + local-test.sh
+Progress per 9 Juli 2026, 08:00 WIB (Sesi #007 selesai):
+- Backend:     ✅ SELESAI — 11 router, semua services, Python import passing
+- Frontend:    ✅ SELESAI — npm run build SUCCESS (0 errors)
+- Flutter:     🟡 Code fixed, flutter analyze BELUM diverifikasi (BUG-013)
+- Deploy:      ✅ scripts/install.sh SIAP untuk native Ubuntu (no Docker)
 
-Cara jalankan lokal: bash scripts/setup-local.sh → make dev
 Next task: [sebutkan]
 ```
 
@@ -147,6 +137,7 @@ Next task: [sebutkan]
 | Repo | https://github.com/silverefendy/nvr_cam |
 | Server | Ubuntu Server 24.04 + Intel i5 + 8x WD Purple 4TB ZFS |
 | Kamera | 30x Dahua H.265 RTSP |
-| Jaringan | P2P Ubiquiti pabrik↔kantor, ZeroTier kantor↔rumah |
+| Install dir | `/opt/nvr_cam` |
+| Runtime dir | `/var/lib/nvr_cam/` (HLS + snapshots) |
 | Notifikasi | Telegram Bot + SMTP email |
-| Login default | admin / cctv1234 |
+| Login default | admin / nvr1234 |
