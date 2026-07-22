@@ -1,13 +1,4 @@
-"""
-Configuration management router - handles all config CRUD operations via API.
-"""
-import asyncio
-import subprocess
-from datetime import datetime
-from pathlib import Path
-from typing import Any
-
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File
 from fastapi.responses import Response
 
 from backend.api.dependencies import get_current_admin_user
@@ -30,6 +21,12 @@ from backend.services.notifier.telegram import TelegramNotifier
 from backend.services.notifier.email import EmailNotifier
 from backend.utils.config_manager import config_manager
 
+import asyncio
+import subprocess
+from datetime import datetime
+from pathlib import Path
+from typing import Any
+
 router = APIRouter(prefix="/config", tags=["config"])
 
 
@@ -47,7 +44,6 @@ async def create_camera_config(
     _user=Depends(get_current_admin_user),
 ):
     """Add a new camera to cameras.yaml."""
-    # Auto-generate ID if not provided
     if not camera.id:
         existing = await config_manager.get_cameras()
         max_num = 0
@@ -59,8 +55,7 @@ async def create_camera_config(
                 except ValueError:
                     pass
         camera.id = f"cam_{max_num + 1:02d}"
-    
-    # Build RTSP URLs if custom ones not provided
+
     camera_data = camera.model_dump()
     if not camera_data.get("rtsp_main_custom"):
         camera_data["rtsp_main"] = _build_dahua_rtsp(
@@ -73,7 +68,7 @@ async def create_camera_config(
         )
     else:
         camera_data["rtsp_main"] = camera_data["rtsp_main_custom"]
-    
+
     if not camera_data.get("rtsp_sub_custom"):
         camera_data["rtsp_sub"] = _build_dahua_rtsp(
             camera_data["ip_address"],
@@ -85,11 +80,10 @@ async def create_camera_config(
         )
     else:
         camera_data["rtsp_sub"] = camera_data["rtsp_sub_custom"]
-    
-    # Remove custom fields
+
     camera_data.pop("rtsp_main_custom", None)
     camera_data.pop("rtsp_sub_custom", None)
-    
+
     await config_manager.add_camera(camera_data)
     return ConfigResponse(data={"camera": camera_data})
 
@@ -102,14 +96,13 @@ async def update_camera_config(
 ):
     """Update an existing camera in cameras.yaml."""
     update_data = camera.model_dump(exclude_unset=True)
-    
-    # Rebuild RTSP URLs if IP/credentials changed
+
     if any(k in update_data for k in ["ip_address", "port", "username", "password", "channel"]):
         existing = await config_manager.get_cameras()
         existing_cam = next((c for c in existing if c.get("id") == camera_id), None)
         if not existing_cam:
             raise HTTPException(status_code=404, detail="Camera not found")
-        
+
         merged = {**existing_cam, **update_data}
         if not update_data.get("rtsp_main_custom"):
             update_data["rtsp_main"] = _build_dahua_rtsp(
@@ -129,10 +122,10 @@ async def update_camera_config(
                 merged["channel"],
                 1,
             )
-    
+
     update_data.pop("rtsp_main_custom", None)
     update_data.pop("rtsp_sub_custom", None)
-    
+
     await config_manager.update_camera(camera_id, update_data)
     return ConfigResponse(data={"camera_id": camera_id})
 
@@ -232,7 +225,7 @@ async def test_notification(
     """Send test notification via Telegram and/or Email."""
     results = {"telegram_sent": False, "email_sent": False}
     errors = []
-    
+
     if request.telegram:
         try:
             notifier = TelegramNotifier()
@@ -240,7 +233,7 @@ async def test_notification(
             results["telegram_sent"] = True
         except Exception as e:
             errors.append(f"Telegram failed: {str(e)}")
-    
+
     if request.email:
         try:
             email_notifier = EmailNotifier()
@@ -251,7 +244,7 @@ async def test_notification(
             results["email_sent"] = True
         except Exception as e:
             errors.append(f"Email failed: {str(e)}")
-    
+
     return NotificationTestResponse(
         success=len(errors) == 0,
         message="Test notifications sent" if len(errors) == 0 else "; ".join(errors),
@@ -266,38 +259,30 @@ async def apply_config(request: Request, _user=Depends(get_current_admin_user)):
     try:
         recording_manager = request.app.state.recording_manager
         motion_manager = request.app.state.motion_manager
-        
-        # Reload cameras from database and restart recording
+
         cameras = await recording_manager.load_cameras_from_db()
-        
-        # Get current camera IDs
+
         current_ids = set(recording_manager.recorders.keys())
         new_ids = {cam["id"] for cam in cameras if cam.get("is_active", True)}
-        
-        # Cameras to stop (removed or deactivated)
+
         to_stop = current_ids - new_ids
-        # Cameras to start (new or reactivated)
         to_start = new_ids - current_ids
-        # Cameras to restart (configuration changed)
         to_restart = current_ids & new_ids
-        
+
         restarted = []
         started = []
         stopped = []
-        
-        # Stop removed/deactivated cameras
+
         for camera_id in to_stop:
             if camera_id in recording_manager.recorders:
                 await recording_manager.recorders[camera_id].stop()
                 del recording_manager.recorders[camera_id]
                 stopped.append(camera_id)
-        
-        # Restart cameras with config changes
+
         for camera_id in to_restart:
             await recording_manager.restart_camera(camera_id)
             restarted.append(camera_id)
-        
-        # Start new cameras
+
         for camera_id in to_start:
             cam_dict = next((c for c in cameras if c["id"] == camera_id), None)
             if cam_dict:
@@ -306,14 +291,13 @@ async def apply_config(request: Request, _user=Depends(get_current_admin_user)):
                 recording_manager.recorders[camera_id] = recorder
                 asyncio.create_task(recorder.start())
                 started.append(camera_id)
-        
-        # Restart motion manager if motion settings changed
+
         if motion_manager:
             motion_cameras = [cam for cam in cameras if cam.get("motion_enabled")]
             await motion_manager.stop_all()
             if motion_cameras:
                 asyncio.create_task(motion_manager.start_all(motion_cameras))
-        
+
         return ConfigApplyResponse(
             success=True,
             message=f"Configuration applied: {len(restarted)} restarted, {len(started)} started, {len(stopped)} stopped",
@@ -357,7 +341,7 @@ async def list_backups(_user=Depends(get_current_admin_user)):
     """List available configuration backups."""
     backup_dir = Path(__file__).parent.parent.parent.parent / "config" / "backups"
     backups = []
-    
+
     if backup_dir.exists():
         for backup_file in sorted(backup_dir.glob("*.yaml.*"), reverse=True)[:5]:
             stat = backup_file.stat()
@@ -368,7 +352,7 @@ async def list_backups(_user=Depends(get_current_admin_user)):
                     size_bytes=stat.st_size,
                 )
             )
-    
+
     return BackupListResponse(backups=backups)
 
 
@@ -383,40 +367,36 @@ async def _test_rtsp_connection(rtsp_url: str, timeout: int) -> dict[str, Any]:
     try:
         cmd = [
             "ffprobe",
-            "-v",
-            "error",
+            "-v", "error",
             "-show_streams",
             "-show_format",
-            "-of",
-            "json",
-            "-timeout",
-            str(timeout * 1000000),  # microseconds
+            "-of", "json",
+            "-timeout", str(timeout * 1000000),
             rtsp_url,
         ]
-        
+
         process = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        
+
         stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
-        
+
         if process.returncode != 0:
             return {"success": False, "message": f"FFprobe failed: {stderr.decode()}"}
-        
+
         import json
         data = json.loads(stdout.decode())
-        
-        # Extract stream info
+
         stream = data.get("streams", [{}])[0]
         codec = stream.get("codec_name", "unknown")
         width = stream.get("width")
         height = stream.get("height")
         fps = stream.get("r_frame_rate")
-        
+
         resolution = f"{width}x{height}" if width and height else "unknown"
-        
+
         return {
             "success": True,
             "message": "RTSP connection successful",
