@@ -38,8 +38,8 @@ services:
 
   frontend:
     build:
-      context: ./frontend
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: frontend/Dockerfile.frontend.prod
     container_name: cctv_web
     ports:
       - "3000:80"
