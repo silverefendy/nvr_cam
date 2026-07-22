@@ -2,6 +2,7 @@
 ## Ringkasan Proyek NVR CCTV Custom
 
 **Dibuat:** 22 Juli 2026  
+**Diperbarui:** 22 Juli 2026 (Sesi #009)  
 **Sumber:** Audit kode + dokumen repo (README, FEATURES, PROGRESS, HANDOFF, docker-compose, Dockerfile)
 
 ---
@@ -57,6 +58,11 @@ Script `install.sh` otomatis menginstall semua dependensi (`ffmpeg`, `postgresql
 
 ### Kamera & Streaming
 - Live view semua kamera dalam grid (hingga 30 kamera) via HLS
+- **Fullscreen per kamera** — double-click video atau tombol ⛶, tutup dengan ESC *(baru: Sesi #009)*
+- **Layout grid pilihan** — 1×1, 2×2, 3×3, 4×4, 5×6 *(baru: Sesi #009)*
+- **Filter/select kamera** — pilih kamera mana yang ditampilkan, search by nama/lokasi *(baru: Sesi #009)*
+- **Toggle Main/Sub stream** per kamera saat hover — default sub stream hemat bandwidth *(baru: Sesi #009)*
+- **Picture-in-Picture** via Browser PiP API — tombol ⧉ saat hover *(baru: Sesi #009)*
 - Manajemen kamera: tambah, edit, hapus, test koneksi RTSP
 - Discovery kamera otomatis via ONVIF WS-Discovery
 - Status online/offline real-time via WebSocket
@@ -64,7 +70,7 @@ Script `install.sh` otomatis menginstall semua dependensi (`ffmpeg`, `postgresql
 - Snapshot on-demand per kamera
 
 ### Rekaman
-- Rekaman otomatis 24/7 (`H.265 stream copy`, tanpa re-encode)
+- Rekaman otomatis 24/7 (H.265 stream copy, tanpa re-encode)
 - Segmentasi per durasi (default 1 jam per file)
 - Playback di browser dengan scrub/seek (HTTP Range support)
 - Filter rekaman berdasarkan kamera + tanggal + timeline jam
@@ -105,22 +111,16 @@ Script `install.sh` otomatis menginstall semua dependensi (`ffmpeg`, `postgresql
 
 ---
 
-## Fitur yang Sedang Dirancang (🎯 Dirancang)
+## Fitur yang Sedang Dirancang / Backlog Prioritas
 
-- Toggle main/sub stream per kamera di live view
-- FPS custom per kamera di live view (dengan warning CPU)
-- Picture-in-Picture via Browser PiP API
-- FPS adaptif saat motion (rekaman FPS tinggi saat ada gerakan)
+| Batch | Fitur | Status |
+|-------|-------|--------|
+| Batch 2 | Download rekaman ke lokal (D-09) | ⏳ |
+| Batch 3 | Alert disk kritis via Telegram (F-10) | ⏳ |
+| Batch 3 | Jadwal cleanup terjadwal dari UI (F-09) | ⏳ |
+| Batch 3 | Statistik storage per kamera (F-08) | ⏳ |
 
----
-
-## Fitur Belum Ada (Backlog Prioritas Tinggi)
-
-- Verifikasi `flutter analyze` + build APK mobile (BUG-013)
-- Download rekaman ke lokal
-- Motion event marker di timeline playback
-- Alert storage kritis via Telegram
-- HTTPS/SSL (saat ini hanya HTTP)
+Lihat **ISSUES.md** untuk daftar lengkap semua issue dan statusnya.
 
 ---
 
@@ -130,7 +130,7 @@ Script `install.sh` otomatis menginstall semua dependensi (`ffmpeg`, `postgresql
 |----------|---------|-------|
 | Auth & User | 5 | 10 |
 | Manajemen Kamera | 13 | 16 |
-| Live Streaming | 4 | 13 |
+| Live Streaming | **9** | 13 |
 | Rekaman | 8 | 13 |
 | Motion Detection | 6 | 13 |
 | Storage | 7 | 10 |
@@ -140,9 +140,9 @@ Script `install.sh` otomatis menginstall semua dependensi (`ffmpeg`, `postgresql
 | AV1 Encoder | 3 | 5 |
 | Mobile Flutter | 5 | 10 |
 | Deployment | 7 | 9 |
-| **TOTAL** | **80** | **130** |
+| **TOTAL** | **85** | **130** |
 
-**Progress: 80/130 fitur selesai (61%) + 7 sedang dirancang = 87/130 dalam pipeline (67%)**
+**Progress: 85/130 fitur selesai (65%) — naik dari 80 setelah Batch 1 Live View**
 
 ---
 
@@ -167,5 +167,6 @@ Script `install.sh` otomatis menginstall semua dependensi (`ffmpeg`, `postgresql
 | `FEATURES.md` | Daftar lengkap semua fitur + backlog + keputusan desain |
 | `PROGRESS.md` | Timeline sesi development + daftar bug |
 | `HANDOFF.md` | Panduan melanjutkan development di sesi AI baru |
+| `ISSUES.md` | Issue tracker aktif — status selesai/belum per fitur |
 | `AUDIT_REPORT.md` | Laporan audit teknis lengkap |
 | `Docs/NVR_CAM_Blueprint.md` | Arsitektur teknis sistem |
