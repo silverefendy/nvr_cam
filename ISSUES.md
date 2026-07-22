@@ -33,7 +33,7 @@
 | C-05 | Fullscreen per kamera (double-click atau tombol ⛶) | ✅ | #009 | 22 Jul 2026 | `VideoPlayer.tsx`, `FullscreenPlayer.tsx` (baru), `CameraGrid.tsx`, `cameras.ts` (store) |
 | C-06 | Pilihan layout grid (1×1, 2×2, 3×3, 4×4, 5×6) | ✅ | #009 | 22 Jul 2026 | `LiveView/index.tsx` (sudah ada tombolnya, diperbaiki UI) |
 | C-07 | Filter/multi-select subset kamera yang ditampilkan | ✅ | #009 | 22 Jul 2026 | `LiveView/index.tsx`, `cameras.ts` (store: tambah selectAll/selectNone) |
-| C-11 | Toggle Main/Sub stream per kamera | ✅ | #009 | 22 Jul 2026 | `VideoPlayer.tsx`, `cameras.ts` (store: streamTypeOverride), `api/cameras.ts` |
+| C-11 | Toggle Main/Sub stream per kamera | ✅ | #009 | 22 Jul 2026 | `VideoPlayer.tsx`, `cameras.ts` (store: streamTypeOverride), `api/cameras.ts`, `backend/api/routers/stream.py` |
 | C-13 | Picture-in-Picture via Browser PiP API | ✅ | #009 | 22 Jul 2026 | `VideoPlayer.tsx` |
 
 ### Catatan Teknis Batch 1
@@ -41,25 +41,45 @@
 - **Fullscreen (C-05):** Overlay modal full-window. Double-click video atau klik tombol ⛶. Tutup dengan ESC atau tombol Tutup. Component baru: `FullscreenPlayer.tsx`
 - **Layout grid (C-06):** Tombol 1×1/2×2/3×3/4×4/5×6 di toolbar. State di Zustand store.
 - **Filter kamera (C-07):** Panel filter toggle, search by nama/lokasi, toggle per kamera, tombol Pilih Semua / Hapus Semua. Badge status online/offline per kamera di filter.
-- **Toggle stream (C-11):** Tombol MAIN/SUB muncul saat hover di atas video. Default: SUB stream (hemat bandwidth). State per-kamera di Zustand, dikirim ke backend via query param `?stream=main` atau `?stream=sub`.
+- **Toggle stream (C-11):** Tombol MAIN/SUB muncul saat hover di atas video. Default: SUB stream (hemat bandwidth). State per-kamera di Zustand, dikirim ke backend via query param `?stream=main` atau `?stream=sub`. Backend kini membaca param ini dan return URL HLS dari folder yang berbeda (`/main/` vs `/sub/`). Legacy endpoints tanpa stream_type tetap ada untuk backward compat.
 - **PiP (C-13):** Browser PiP API (`requestPictureInPicture()`). Tombol ⧉ muncul saat hover, hanya jika browser support. ESC dari PiP otomatis oleh browser.
 - **useHLSPlayer:** Signature diubah — sekarang menerima `RefObject<HTMLVideoElement>` dari luar (bukan buat ref sendiri), agar VideoPlayer bisa akses `videoRef.current` untuk PiP API.
 
-### ⚠️ Perlu Diverifikasi di Backend
+### ✅ C-11 Backend Fix (Sesi #010 — 22 Jul 2026)
 
-Toggle stream (C-11) mengirim param `?stream=main` atau `?stream=sub` ke endpoint `GET /stream/{id}/live`.  
-Perlu pastikan backend router `backend/api/routers/stream.py` membaca query param ini dan mengembalikan HLS URL yang sesuai (main stream vs sub stream).
+Endpoint `GET /stream/{camera_id}/live` sebelumnya selalu return URL yang sama tanpa memperhatikan query param `stream`.
+
+**Perubahan di `backend/api/routers/stream.py`:**
+- Tambah query param `stream: Literal["main", "sub"] = "sub"` di endpoint `/live`
+- Response kini return `hls_url` yang mengarah ke folder berbeda: `/api/v1/stream/{id}/main/index.m3u8` atau `/api/v1/stream/{id}/sub/index.m3u8`
+- Tambah 2 endpoint baru: `/{camera_id}/{stream_type}/index.m3u8` dan `/{camera_id}/{stream_type}/segment/{filename}`
+- Endpoint lama (tanpa stream_type) dipertahankan sebagai legacy backward compat, fallback ke sub
+- Snapshot juga support `?stream=main/sub` — pilih RTSP URL yang sesuai (`rtsp_main` vs `rtsp_sub`)
+
+> ⚠️ **Catatan untuk FFmpeg worker:** Pastikan HLS output disimpan di subfolder `/main/` atau `/sub/` sesuai stream type. Contoh path: `/tmp/hls/{camera_id}/sub/index.m3u8`
 
 ---
 
 ## 🎯 Batch 2 — Download Rekaman
 
 > **Target:** User bisa download file rekaman dari halaman Playback  
-> **Status Batch:** ⏳ Belum mulai
+> **Sesi:** #010 — 22 Juli 2026  
+> **Status Batch:** ✅ Selesai (backend)
 
 | ID | Issue | Status | Sesi | Tanggal | File yang Diubah |
 |----|-------|--------|------|---------|------------------|
-| D-09 | Download rekaman ke lokal (endpoint + tombol di UI) | ⏳ | — | — | `backend/api/routers/recordings.py`, `frontend/src/pages/Playback/` |
+| D-09 | Download rekaman ke lokal (endpoint + tombol di UI) | ✅ backend / ⏳ frontend | #010 | 22 Jul 2026 | `backend/api/routers/recordings.py` |
+
+### Catatan Teknis Batch 2
+
+**Backend (✅ selesai):**
+- Endpoint baru: `GET /api/v1/recordings/{id}/download`
+- Berbeda dengan `/play` (streaming inline), endpoint ini force-download dengan `Content-Disposition: attachment`
+- Filename otomatis: `{camera_id}_{YYYYMMDD_HHMMSS}.mp4` — contoh: `CAM01_20260722_143000.mp4`
+- Auth: minimal `get_current_user` (semua user yang login bisa download)
+
+**Frontend (⏳ perlu dikerjakan — PowerShell di lokal):**
+Tambah tombol Download di halaman Playback, panggil endpoint baru dengan `window.open()` atau anchor tag.
 
 ---
 
@@ -186,6 +206,7 @@ Semua bug dari Sesi #001–#007 sudah difix. Lihat `PROGRESS.md` untuk detail le
 | Batch | Fitur | Status |
 |-------|-------|--------|
 | Batch 1 — Live View | 5 fitur (C-05, C-06, C-07, C-11, C-13) | ✅ Selesai |
-| Batch 2 — Download Rekaman | 1 fitur (D-09) | ⏳ Belum |
+| C-11 Backend Fix | Toggle stream baca query param di backend | ✅ Selesai |
+| Batch 2 — Download Rekaman | 1 fitur (D-09) | ✅ Backend selesai / ⏳ Frontend |
 | Batch 3 — Alert Disk | 3 fitur (F-08, F-09, F-10) | ⏳ Belum |
 | Sisa backlog | ~41 fitur | ⏳ Belum dijadwalkan |
