@@ -2,8 +2,8 @@
 ## Ringkasan Proyek NVR CCTV Custom
 
 **Dibuat:** 22 Juli 2026  
-**Diperbarui:** 22 Juli 2026 (Sesi #009)  
-**Sumber:** Audit kode + dokumen repo (README, FEATURES, PROGRESS, HANDOFF, docker-compose, Dockerfile)
+**Diperbarui:** 22 Juli 2026 (Sesi #009 — lanjutan)  
+**Sumber:** Audit kode + dokumen repo
 
 ---
 
@@ -15,14 +15,10 @@
 
 ## Deployment — Cara Aplikasi Dijalankan
 
-Aplikasi ini menggunakan **native install langsung ke Ubuntu Server** — **bukan Docker** untuk production.
-
 | Mode | Keterangan |
 |------|------------|
 | **Production** | Native Ubuntu Server 24.04 via `scripts/install.sh` + 4 systemd services + Nginx |
-| **Development** | Docker Compose (`docker-compose.dev.yml`) untuk testing lokal |
-
-Script `install.sh` otomatis menginstall semua dependensi (`ffmpeg`, `postgresql`, `nginx`, `nodejs`, Python virtualenv), menjalankan migrasi database, build frontend, dan mendaftarkan semua services ke systemd.
+| **Development** | Docker Compose (`docker-compose.yml`) untuk testing lokal |
 
 ### 4 Services Systemd (Production)
 
@@ -46,7 +42,7 @@ Script `install.sh` otomatis menginstall semua dependensi (`ffmpeg`, `postgresql
 | Backend | Python 3.12 + FastAPI + SQLAlchemy (async) |
 | Database | PostgreSQL 16 + Alembic migrations |
 | Frontend | React 18 + TypeScript + Tailwind CSS + Vite |
-| Mobile | Flutter 3 (Android APK — screens done, build pending) |
+| Mobile | Flutter 3 (Android APK — screens done, build nanti) |
 | Notifikasi | Telegram Bot API + Email SMTP |
 | Remote access | ZeroTier (kantor ↔ rumah) |
 | Process manager | systemd |
@@ -54,68 +50,55 @@ Script `install.sh` otomatis menginstall semua dependensi (`ffmpeg`, `postgresql
 
 ---
 
-## Fitur Utama yang Sudah Ada (✅ Selesai)
+## Fitur yang Sudah Ada (✅ Selesai)
 
-### Kamera & Streaming
-- Live view semua kamera dalam grid (hingga 30 kamera) via HLS
-- **Fullscreen per kamera** — double-click video atau tombol ⛶, tutup dengan ESC *(baru: Sesi #009)*
-- **Layout grid pilihan** — 1×1, 2×2, 3×3, 4×4, 5×6 *(baru: Sesi #009)*
-- **Filter/select kamera** — pilih kamera mana yang ditampilkan, search by nama/lokasi *(baru: Sesi #009)*
-- **Toggle Main/Sub stream** per kamera saat hover — default sub stream hemat bandwidth *(baru: Sesi #009)*
-- **Picture-in-Picture** via Browser PiP API — tombol ⧉ saat hover *(baru: Sesi #009)*
+### Kamera & Live View
+- Live view grid hingga 30 kamera via HLS
+- **Fullscreen per kamera** — double-click atau tombol ⛶, tutup ESC *(Sesi #009)*
+- **Layout grid pilihan** — 1×1, 2×2, 3×3, 4×4, 5×6 *(Sesi #009)*
+- **Filter/select kamera** — pilih subset, search by nama/lokasi *(Sesi #009)*
+- **Toggle Main/Sub stream** per kamera saat hover *(Sesi #009)*
+- **Picture-in-Picture** via Browser PiP API *(Sesi #009)*
 - Manajemen kamera: tambah, edit, hapus, test koneksi RTSP
 - Discovery kamera otomatis via ONVIF WS-Discovery
 - Status online/offline real-time via WebSocket
-- Dual stream support (main + sub stream Dahua)
 - Snapshot on-demand per kamera
 
 ### Rekaman
 - Rekaman otomatis 24/7 (H.265 stream copy, tanpa re-encode)
-- Segmentasi per durasi (default 1 jam per file)
-- Playback di browser dengan scrub/seek (HTTP Range support)
-- Filter rekaman berdasarkan kamera + tanggal + timeline jam
-- Auto-delete rekaman lama saat disk > threshold (circular buffer)
-- Proteksi rekaman penting dari auto-delete
+- Segmentasi per jam (1 file = 1 jam)
+- Playback di browser dengan scrub/seek
+- **Download rekaman ke lokal** *(Sesi #009 — D-09)*
+- Filter rekaman by kamera + tanggal + timeline jam
+- Auto-delete circular saat disk > threshold
+- Proteksi rekaman dari auto-delete
 
 ### Deteksi Gerakan
-- Deteksi motion otomatis per kamera via OpenCV
-- Notifikasi Telegram (teks + foto) dan Email SMTP saat ada gerakan
-- Riwayat events tersimpan di database
-- Snapshot otomatis saat motion terdeteksi
+- OpenCV MOG2 background subtractor
+- Notifikasi Telegram (teks + foto) dan Email SMTP
+- Riwayat events di database + snapshot otomatis
 
 ### Storage
-- Multi-drive support (hingga 8 HDD, cocok untuk WD Purple 4TB)
-- ZFS pool support
-- Dashboard status drive (total/used/free + estimasi hari)
+- Multi-drive support (hingga 8 HDD) + ZFS
+- Dashboard status drive + estimasi hari
 - Mapping kamera per drive
-- Auto-cleanup dan manual cleanup dari UI
+- Auto-cleanup + manual cleanup dari UI
 
-### Monitoring Server
-- Dashboard CPU, RAM, disk usage real-time via WebSocket
-- Uptime server
-- Status 4 services (api, recorder, motion, encoder)
-- Jumlah kamera online/offline/total
+### Monitoring & Konfigurasi
+- CPU/RAM/disk real-time via WebSocket
+- Status 4 services
+- Edit config dari UI + backup/restore ZIP
+- Re-encode AV1 background (hemat ~50% storage)
 
-### Autentikasi & User
-- Login JWT (access + refresh token)
-- 5 role: `super_admin`, `admin`, `operator`, `viewer`, `security`
-- CRUD user
-
-### Konfigurasi
-- Edit konfigurasi sistem dari UI (storage threshold, notifikasi, dll)
-- Backup + restore config ke file ZIP
-- Apply config live tanpa restart penuh
-
-### Background Encoding
-- Re-encode rekaman lama H.265 → AV1 secara otomatis saat server idle malam hari (hemat ~50% storage)
+### Auth & User
+- Login JWT, 5 role RBAC, CRUD user
 
 ---
 
-## Fitur yang Sedang Dirancang / Backlog Prioritas
+## Fitur Prioritas Berikutnya
 
 | Batch | Fitur | Status |
 |-------|-------|--------|
-| Batch 2 | Download rekaman ke lokal (D-09) | ⏳ |
 | Batch 3 | Alert disk kritis via Telegram (F-10) | ⏳ |
 | Batch 3 | Jadwal cleanup terjadwal dari UI (F-09) | ⏳ |
 | Batch 3 | Statistik storage per kamera (F-08) | ⏳ |
@@ -130,8 +113,8 @@ Lihat **ISSUES.md** untuk daftar lengkap semua issue dan statusnya.
 |----------|---------|-------|
 | Auth & User | 5 | 10 |
 | Manajemen Kamera | 13 | 16 |
-| Live Streaming | **9** | 13 |
-| Rekaman | 8 | 13 |
+| Live Streaming | 9 | 13 |
+| Rekaman | **9** | 13 |
 | Motion Detection | 6 | 13 |
 | Storage | 7 | 10 |
 | Discovery ONVIF | 7 | 8 |
@@ -140,9 +123,9 @@ Lihat **ISSUES.md** untuk daftar lengkap semua issue dan statusnya.
 | AV1 Encoder | 3 | 5 |
 | Mobile Flutter | 5 | 10 |
 | Deployment | 7 | 9 |
-| **TOTAL** | **85** | **130** |
+| **TOTAL** | **86** | **130** |
 
-**Progress: 85/130 fitur selesai (65%) — naik dari 80 setelah Batch 1 Live View**
+**Progress: 86/130 fitur selesai (66%) — naik dari 85 setelah D-09 Download Rekaman**
 
 ---
 
@@ -164,9 +147,9 @@ Lihat **ISSUES.md** untuk daftar lengkap semua issue dan statusnya.
 | File | Isi |
 |------|-----|
 | `README.md` | Quick start, struktur proyek, setup dev |
-| `FEATURES.md` | Daftar lengkap semua fitur + backlog + keputusan desain |
-| `PROGRESS.md` | Timeline sesi development + daftar bug |
-| `HANDOFF.md` | Panduan melanjutkan development di sesi AI baru |
-| `ISSUES.md` | Issue tracker aktif — status selesai/belum per fitur |
+| `FEATURES.md` | Daftar lengkap semua fitur |
+| `PROGRESS.md` | Timeline sesi + bug tracker historis |
+| `HANDOFF.md` | Panduan handoff ke AI baru |
+| `ISSUES.md` | Issue tracker aktif — status per fitur |
 | `AUDIT_REPORT.md` | Laporan audit teknis lengkap |
 | `Docs/NVR_CAM_Blueprint.md` | Arsitektur teknis sistem |

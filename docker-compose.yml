@@ -1,20 +1,18 @@
-version: '3.9'
-
 services:
   db:
     image: postgres:16-alpine
     container_name: cctv_db
     environment:
-      POSTGRES_USER: ${DB_USER:-cctv_user}
-      POSTGRES_PASSWORD: ${DB_PASSWORD}
-      POSTGRES_DB: ${DB_NAME:-cctv_db}
+      POSTGRES_USER: ${DB_USER:-nvr_user}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-devpassword123}
+      POSTGRES_DB: ${DB_NAME:-nvr_cam}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:
       - "5432:5432"
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-cctv_user}"]
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-nvr_user} -d ${DB_NAME:-nvr_cam}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -25,10 +23,12 @@ services:
       dockerfile: Dockerfile.backend
     container_name: cctv_api
     env_file: .env
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://${DB_USER:-nvr_user}:${DB_PASSWORD:-devpassword123}@db:5432/${DB_NAME:-nvr_cam}
     volumes:
       - ./config:/app/config:ro
-      - /mnt:/mnt  # mount point HDD ZFS
-      - /tmp/hls:/tmp/hls
+      - hls_data:/var/lib/nvr_cam/hls
+      - snapshot_data:/var/lib/nvr_cam/snapshots
     ports:
       - "8000:8000"
     depends_on:
@@ -49,3 +49,5 @@ services:
 
 volumes:
   postgres_data:
+  hls_data:
+  snapshot_data:

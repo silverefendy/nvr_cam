@@ -1,5 +1,5 @@
-﻿# Dockerfile.backend
-# Dipakai oleh docker-compose.dev.yml dan docker-compose.prod.yml
+# Dockerfile.backend
+# Dipakai oleh docker-compose.yml dan docker-compose.dev.yml
 FROM python:3.12-slim
 
 # Sistem deps: FFmpeg, OpenCV libs
@@ -18,7 +18,12 @@ COPY backend/ ./backend/
 COPY config/ ./config/
 COPY .env.example .env
 
+# Salin alembic.ini ke /app dan sesuaikan script_location ke backend/db/migrations
+COPY backend/alembic.ini ./alembic.ini
+RUN sed -i 's|^script_location = db/migrations|script_location = backend/db/migrations|' alembic.ini
+
+# Buat direktori runtime
+RUN mkdir -p /var/lib/nvr_cam/hls /var/lib/nvr_cam/snapshots
+
 # Jalankan migration dulu, lalu start server
-CMD ["sh", "-c", "alembic -c /app/backend/alembic.ini upgrade head && uvicorn backend.api.app:app --host 0.0.0.0 --port 8000"]
-
-
+CMD ["sh", "-c", "alembic upgrade head && uvicorn backend.api.app:app --host 0.0.0.0 --port 8000"]

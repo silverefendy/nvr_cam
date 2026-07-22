@@ -2,7 +2,7 @@
 ## Issue Tracker & Status Penyelesaian
 
 **Dibuat:** 22 Juli 2026  
-**Diperbarui:** 22 Juli 2026  
+**Diperbarui:** 22 Juli 2026 (Sesi #009 — lanjutan)  
 **Repo:** https://github.com/silverefendy/nvr_cam
 
 > File ini mencatat semua issue/task yang sedang dikerjakan atau sudah selesai.  
@@ -22,6 +22,16 @@
 
 ---
 
+## 🐛 Bug Fixes Sesi #009
+
+| ID | Bug | Status | Sesi | Tanggal | Root Cause |
+|----|-----|--------|------|---------|------------|
+| BUG-025 | `cctv_db` crash: `database "nvr_user" does not exist` | ✅ | #009 | 22 Jul 2026 | `docker-compose.yml` masih pakai default lama `cctv_user`/`cctv_db` — tidak sinkron dengan `.env.example` |
+| BUG-026 | `cctv_api` crash: `Path doesn't exist: '/app/db/migrations'` | ✅ | #009 | 22 Jul 2026 | `alembic.ini` pakai `script_location = db/migrations` tapi WORKDIR di Docker adalah `/app` dan kode ada di `/app/backend/` — path tidak match. Fix: `sed` di Dockerfile patch jadi `backend/db/migrations` |
+| BUG-027 | `cctv_web` crash: `unknown directive "﻿server"` | ✅ | #009 | 22 Jul 2026 | BOM character (UTF-8 BOM `\xEF\xBB\xBF`) di `cctv.conf` dan `Dockerfile.frontend.prod` — file disimpan dengan encoding Windows BOM. Fix: tulis ulang file tanpa BOM |
+
+---
+
 ## 🎯 Batch 1 — Live View Improvements
 
 > **Target:** Perbaiki UI live view agar lebih fungsional untuk monitoring 30 kamera  
@@ -31,9 +41,9 @@
 | ID | Issue | Status | Sesi | Tanggal | File yang Diubah |
 |----|-------|--------|------|---------|------------------|
 | C-05 | Fullscreen per kamera (double-click atau tombol ⛶) | ✅ | #009 | 22 Jul 2026 | `VideoPlayer.tsx`, `FullscreenPlayer.tsx` (baru), `CameraGrid.tsx`, `cameras.ts` (store) |
-| C-06 | Pilihan layout grid (1×1, 2×2, 3×3, 4×4, 5×6) | ✅ | #009 | 22 Jul 2026 | `LiveView/index.tsx` (sudah ada tombolnya, diperbaiki UI) |
+| C-06 | Pilihan layout grid (1×1, 2×2, 3×3, 4×4, 5×6) | ✅ | #009 | 22 Jul 2026 | `LiveView/index.tsx` |
 | C-07 | Filter/multi-select subset kamera yang ditampilkan | ✅ | #009 | 22 Jul 2026 | `LiveView/index.tsx`, `cameras.ts` (store: tambah selectAll/selectNone) |
-| C-11 | Toggle Main/Sub stream per kamera | ✅ | #009 | 22 Jul 2026 | `VideoPlayer.tsx`, `cameras.ts` (store: streamTypeOverride), `api/cameras.ts`, `backend/api/routers/stream.py` |
+| C-11 | Toggle Main/Sub stream per kamera | ✅ | #009 | 22 Jul 2026 | `VideoPlayer.tsx`, `cameras.ts` (store: streamTypeOverride), `api/cameras.ts`, `stream.py` |
 | C-13 | Picture-in-Picture via Browser PiP API | ✅ | #009 | 22 Jul 2026 | `VideoPlayer.tsx` |
 
 ### Catatan Teknis Batch 1
@@ -41,45 +51,28 @@
 - **Fullscreen (C-05):** Overlay modal full-window. Double-click video atau klik tombol ⛶. Tutup dengan ESC atau tombol Tutup. Component baru: `FullscreenPlayer.tsx`
 - **Layout grid (C-06):** Tombol 1×1/2×2/3×3/4×4/5×6 di toolbar. State di Zustand store.
 - **Filter kamera (C-07):** Panel filter toggle, search by nama/lokasi, toggle per kamera, tombol Pilih Semua / Hapus Semua. Badge status online/offline per kamera di filter.
-- **Toggle stream (C-11):** Tombol MAIN/SUB muncul saat hover di atas video. Default: SUB stream (hemat bandwidth). State per-kamera di Zustand, dikirim ke backend via query param `?stream=main` atau `?stream=sub`. Backend kini membaca param ini dan return URL HLS dari folder yang berbeda (`/main/` vs `/sub/`). Legacy endpoints tanpa stream_type tetap ada untuk backward compat.
-- **PiP (C-13):** Browser PiP API (`requestPictureInPicture()`). Tombol ⧉ muncul saat hover, hanya jika browser support. ESC dari PiP otomatis oleh browser.
-- **useHLSPlayer:** Signature diubah — sekarang menerima `RefObject<HTMLVideoElement>` dari luar (bukan buat ref sendiri), agar VideoPlayer bisa akses `videoRef.current` untuk PiP API.
-
-### ✅ C-11 Backend Fix (Sesi #010 — 22 Jul 2026)
-
-Endpoint `GET /stream/{camera_id}/live` sebelumnya selalu return URL yang sama tanpa memperhatikan query param `stream`.
-
-**Perubahan di `backend/api/routers/stream.py`:**
-- Tambah query param `stream: Literal["main", "sub"] = "sub"` di endpoint `/live`
-- Response kini return `hls_url` yang mengarah ke folder berbeda: `/api/v1/stream/{id}/main/index.m3u8` atau `/api/v1/stream/{id}/sub/index.m3u8`
-- Tambah 2 endpoint baru: `/{camera_id}/{stream_type}/index.m3u8` dan `/{camera_id}/{stream_type}/segment/{filename}`
-- Endpoint lama (tanpa stream_type) dipertahankan sebagai legacy backward compat, fallback ke sub
-- Snapshot juga support `?stream=main/sub` — pilih RTSP URL yang sesuai (`rtsp_main` vs `rtsp_sub`)
-
-> ⚠️ **Catatan untuk FFmpeg worker:** Pastikan HLS output disimpan di subfolder `/main/` atau `/sub/` sesuai stream type. Contoh path: `/tmp/hls/{camera_id}/sub/index.m3u8`
+- **Toggle stream (C-11):** Tombol MAIN/SUB muncul saat hover di atas video. Default: SUB stream. State per-kamera di Zustand. Backend `stream.py` sudah support query param `?stream=main|sub`, HLS dir dipisah: `{camera_id}_main/` dan `{camera_id}_sub/`.
+- **PiP (C-13):** Browser PiP API. Tombol ⧉ muncul saat hover, hanya jika browser support.
 
 ---
 
 ## 🎯 Batch 2 — Download Rekaman
 
 > **Target:** User bisa download file rekaman dari halaman Playback  
-> **Sesi:** #010 — 22 Juli 2026  
-> **Status Batch:** ✅ Selesai (backend)
+> **Sesi:** #009 — 22 Juli 2026  
+> **Status Batch:** ✅ Selesai
 
 | ID | Issue | Status | Sesi | Tanggal | File yang Diubah |
 |----|-------|--------|------|---------|------------------|
-| D-09 | Download rekaman ke lokal (endpoint + tombol di UI) | ✅ backend / ⏳ frontend | #010 | 22 Jul 2026 | `backend/api/routers/recordings.py` |
+| D-09 | Download rekaman ke lokal (endpoint + tombol di UI) | ✅ | #009 | 22 Jul 2026 | `backend/api/routers/recordings.py` (endpoint baru `/download`), `frontend/src/pages/Playback/index.tsx` (tombol ⬇ sudah ada), `frontend/src/api/recordings.ts` (downloadUrl sudah ada) |
 
 ### Catatan Teknis Batch 2
 
-**Backend (✅ selesai):**
-- Endpoint baru: `GET /api/v1/recordings/{id}/download`
-- Berbeda dengan `/play` (streaming inline), endpoint ini force-download dengan `Content-Disposition: attachment`
-- Filename otomatis: `{camera_id}_{YYYYMMDD_HHMMSS}.mp4` — contoh: `CAM01_20260722_143000.mp4`
-- Auth: minimal `get_current_user` (semua user yang login bisa download)
-
-**Frontend (⏳ perlu dikerjakan — PowerShell di lokal):**
-Tambah tombol Download di halaman Playback, panggil endpoint baru dengan `window.open()` atau anchor tag.
+- **Backend endpoint baru:** `GET /api/v1/recordings/{id}/download`
+- Berbeda dari `/play` — endpoint ini mengirim header `Content-Disposition: attachment` sehingga browser langsung save dialog
+- Nama file otomatis: `{camera_id}_{YYYY-MM-DD_HH-MM-SS}.mp4` (deskriptif untuk arsip)
+- Frontend `Playback/index.tsx` sudah punya tombol ⬇ Download di setiap item list dan di info bar bawah player — tidak ada perubahan frontend
+- Frontend `api/recordings.ts` sudah punya `downloadUrl` yang point ke `/download` — tidak ada perubahan
 
 ---
 
@@ -140,10 +133,12 @@ Tambah tombol Download di halaman Playback, panggil endpoint baru dengan `window
 | E-12 | Klip video pre/post event (buffer 10 detik) | ⏳ |
 | E-13 | FPS adaptif saat motion | ⏳ |
 
-### Storage (sisa setelah Batch 3)
+### Storage (Batch 3)
 | ID | Issue | Status |
 |----|-------|--------|
-| (sudah dicover di Batch 3) | — | — |
+| F-08 | Statistik storage per kamera | ⏳ |
+| F-09 | Jadwal cleanup terjadwal dari UI | ⏳ |
+| F-10 | Alert disk kritis via Telegram | ⏳ |
 
 ### Konfigurasi
 | ID | Issue | Status |
@@ -190,12 +185,14 @@ Tambah tombol Download di halaman Playback, panggil endpoint baru dengan `window
 
 ---
 
-## Bug Tracker
-
-Semua bug dari Sesi #001–#007 sudah difix. Lihat `PROGRESS.md` untuk detail lengkap.
+## Bug Tracker Keseluruhan
 
 | ID | Bug | Status |
 |----|-----|--------|
+| BUG-001 s/d BUG-024 | Berbagai bug sesi #001–#007 | ✅ Semua fixed |
+| BUG-025 | docker-compose DB name tidak sinkron | ✅ Fixed sesi #009 |
+| BUG-026 | alembic path salah di Docker | ✅ Fixed sesi #009 |
+| BUG-027 | nginx BOM character crash | ✅ Fixed sesi #009 |
 | BUG-013 | Flutter analyze belum diverifikasi | ⏭️ nanti |
 | BUG-019 | structlog dead code | ⏭️ skip |
 
@@ -206,7 +203,7 @@ Semua bug dari Sesi #001–#007 sudah difix. Lihat `PROGRESS.md` untuk detail le
 | Batch | Fitur | Status |
 |-------|-------|--------|
 | Batch 1 — Live View | 5 fitur (C-05, C-06, C-07, C-11, C-13) | ✅ Selesai |
-| C-11 Backend Fix | Toggle stream baca query param di backend | ✅ Selesai |
-| Batch 2 — Download Rekaman | 1 fitur (D-09) | ✅ Backend selesai / ⏳ Frontend |
+| Batch 2 — Download Rekaman | 1 fitur (D-09) | ✅ Selesai |
 | Batch 3 — Alert Disk | 3 fitur (F-08, F-09, F-10) | ⏳ Belum |
-| Sisa backlog | ~41 fitur | ⏳ Belum dijadwalkan |
+| Bug fixes sesi #009 | 3 bug (BUG-025, BUG-026, BUG-027) | ✅ Selesai |
+| Sisa backlog | ~38 fitur | ⏳ Belum dijadwalkan |
