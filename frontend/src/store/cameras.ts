@@ -1,4 +1,4 @@
-import { create } from 'zustand'
+﻿import { create } from 'zustand'
 import type { Camera } from "@/types"
 
 export type GridSize = '1x1'|'2x2'|'3x3'|'4x4'|'5x6'
@@ -19,7 +19,7 @@ interface CameraState {
   setFullscreen: (id: string | null) => void
 }
 
-export const useCameraStore = create<CameraState>((set, get) => ({
+export const useCameraStore = create<CameraState>((set) => ({
   cameras: [],
   selectedCameras: [],
   gridSize: '2x2',
@@ -52,3 +52,4 @@ export const useCameraStore = create<CameraState>((set, get) => ({
 
   setFullscreen: (id) => set({ fullscreenCameraId: id }),
 }))
+

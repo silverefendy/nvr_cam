@@ -1,9 +1,8 @@
-import { useState, useRef, useCallback } from 'react'
+﻿import { useState, useRef, useCallback } from 'react'
 import { useHLSPlayer } from '@/hooks/useHLSPlayer'
 import { camerasApi } from '@/api/cameras'
 import { useQuery } from '@tanstack/react-query'
 import { useCameraStore } from '@/store/cameras'
-import type { Camera } from '@/types'
 
 interface Props {
   cameraId: string
@@ -104,7 +103,7 @@ export const VideoPlayer: React.FC<Props> = ({
             onClick={(e) => { e.stopPropagation(); setShowSnapshotView(false); setSnapshotUrl(null) }}
             className="absolute top-2 right-2 px-2 py-1 bg-black/70 hover:bg-black/90 rounded text-xs text-white"
           >
-            ✕
+            âœ•
           </button>
         </div>
       ) : (
@@ -118,7 +117,7 @@ export const VideoPlayer: React.FC<Props> = ({
             onDoubleClick={handleFullscreen}
           />
 
-          {/* Bottom bar — selalu tampil */}
+          {/* Bottom bar â€” selalu tampil */}
           {showControls && (
             <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent px-2 py-1.5 text-xs text-white flex justify-between items-center">
               <span className="truncate max-w-[60%]">{cameraName || cameraId}</span>
@@ -147,27 +146,27 @@ export const VideoPlayer: React.FC<Props> = ({
                   title="Capture snapshot"
                   className="px-1.5 py-0.5 bg-black/60 hover:bg-gray-600 rounded text-[10px] text-white"
                 >
-                  📷
+                  ðŸ“·
                 </button>
 
-                {/* PiP — C-13 */}
+                {/* PiP â€” C-13 */}
                 {pipSupported && (
                   <button
                     onClick={handlePiP}
                     title="Picture in Picture"
                     className="px-1.5 py-0.5 bg-black/60 hover:bg-purple-600 rounded text-[10px] text-white"
                   >
-                    ⧉
+                    â§‰
                   </button>
                 )}
 
-                {/* Fullscreen — C-05 */}
+                {/* Fullscreen â€” C-05 */}
                 <button
                   onClick={handleFullscreen}
                   title="Fullscreen (or double-click video)"
                   className="px-1.5 py-0.5 bg-black/60 hover:bg-gray-600 rounded text-[10px] text-white"
                 >
-                  ⛶
+                  â›¶
                 </button>
               </div>
             </div>
@@ -177,3 +176,4 @@ export const VideoPlayer: React.FC<Props> = ({
     </div>
   )
 }
+
