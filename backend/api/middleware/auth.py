@@ -2,6 +2,7 @@
 Auth dependency — dipakai di semua router yang butuh login.
 Penggunaan: tambahkan `current_user: User = Depends(require_auth)` di endpoint.
 """
+import uuid
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -30,9 +31,13 @@ async def get_current_user(
 ) -> User:
     try:
         payload = jwt.decode(token, settings.jwt_secret, algorithms=["HS256"])
-        user_id: str = payload.get("sub")
-        if not user_id:
+        user_id_str: str = payload.get("sub")
+        if not user_id_str:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
+        # Cast string UUID ke uuid.UUID agar cocok dengan tipe kolom PostgreSQL
+        user_id = uuid.UUID(user_id_str)
+    except ValueError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid user ID in token")
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token expired")
     except jwt.PyJWTError:
@@ -57,6 +62,6 @@ def require_role(minimum_role: str):
 
 
 # Shortcut dependencies
-require_auth    = Depends(get_current_user)
-require_admin   = Depends(require_role("admin"))
+require_auth     = Depends(get_current_user)
+require_admin    = Depends(require_role("admin"))
 require_operator = Depends(require_role("operator"))
