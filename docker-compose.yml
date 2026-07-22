@@ -23,8 +23,6 @@ services:
       dockerfile: Dockerfile.backend
     container_name: cctv_api
     env_file: .env
-    environment:
-      - DATABASE_URL=postgresql+asyncpg://${DB_USER:-nvr_user}:${DB_PASSWORD:-devpassword123}@db:5432/${DB_NAME:-nvr_cam}
     volumes:
       - ./config:/app/config:ro
       - hls_data:/var/lib/nvr_cam/hls
