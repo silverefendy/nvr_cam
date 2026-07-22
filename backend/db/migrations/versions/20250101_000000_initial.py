@@ -57,13 +57,14 @@ def upgrade() -> None:
     )
 
     # Create recordings table
+    # Note: index=False on columns to avoid duplicate index creation
     op.create_table(
         'recordings',
         sa.Column('id', sa.BigInteger(), primary_key=True, autoincrement=True),
-        sa.Column('camera_id', sa.String(20), sa.ForeignKey('cameras.id'), nullable=False, index=True),
+        sa.Column('camera_id', sa.String(20), sa.ForeignKey('cameras.id'), nullable=False),
         sa.Column('file_path', sa.Text(), nullable=False, unique=True),
         sa.Column('file_size_mb', sa.Float(), nullable=True),
-        sa.Column('started_at', sa.DateTime(timezone=True), nullable=False, index=True),
+        sa.Column('started_at', sa.DateTime(timezone=True), nullable=False),
         sa.Column('ended_at', sa.DateTime(timezone=True), nullable=True),
         sa.Column('duration_s', sa.Integer(), nullable=True),
         sa.Column('codec', sa.String(10), nullable=False, server_default='H265'),
@@ -78,10 +79,10 @@ def upgrade() -> None:
     op.create_table(
         'motion_events',
         sa.Column('id', sa.BigInteger(), primary_key=True, autoincrement=True),
-        sa.Column('camera_id', sa.String(20), sa.ForeignKey('cameras.id'), nullable=False, index=True),
+        sa.Column('camera_id', sa.String(20), sa.ForeignKey('cameras.id'), nullable=False),
         sa.Column('recording_id', sa.BigInteger(), sa.ForeignKey('recordings.id'), nullable=True),
         sa.Column('zone_name', sa.String(50), nullable=True),
-        sa.Column('started_at', sa.DateTime(timezone=True), nullable=False, index=True),
+        sa.Column('started_at', sa.DateTime(timezone=True), nullable=False),
         sa.Column('ended_at', sa.DateTime(timezone=True), nullable=True),
         sa.Column('duration_s', sa.Integer(), nullable=True),
         sa.Column('snapshot_path', sa.Text(), nullable=True),
@@ -101,7 +102,7 @@ def upgrade() -> None:
         sa.Column('service', sa.String(30), nullable=False),
         sa.Column('message', sa.Text(), nullable=False),
         sa.Column('metadata', postgresql.JSONB(), nullable=True),
-        sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False, index=True),
+        sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
     )
     op.create_index(op.f('ix_system_logs_created_at'), 'system_logs', ['created_at'])
 
