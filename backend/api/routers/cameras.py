@@ -40,12 +40,12 @@ async def list_cameras(
             "storage_drive": cam.storage_drive,
             "motion_enabled": cam.motion_enabled,
             "retention_days": cam.retention_days,
-            "segment_duration": cam.segment_duration,
-            "status": cam.status,
+            "segment_duration": cam.config_json.get("segment_duration", 3600) if cam.config_json else 3600,
+            "status": "unknown",
             "is_active": cam.is_active,
             "sort_order": cam.sort_order,
             "config_json": cam.config_json,
-            "last_seen": cam.last_seen,
+            "last_seen": None,
         }
         
         # Get real-time status from RecordingManager
@@ -75,22 +75,21 @@ async def get_camera(
         raise HTTPException(status_code=404, detail=f"Kamera {camera_id} tidak ditemukan")
     
     camera_dict = {
-        "id": camera.id,
-        "name": camera.name,
-        "location": camera.location,
-        "rtsp_main": camera.rtsp_main,
-        "rtsp_sub": camera.rtsp_sub,
-        "storage_drive": camera.storage_drive,
-        "motion_enabled": camera.motion_enabled,
-        "retention_days": camera.retention_days,
-        "segment_duration": camera.segment_duration,
-        "status": camera.status,
-        "is_active": camera.is_active,
-        "sort_order": camera.sort_order,
-        "config_json": camera.config_json,
-        "last_seen": camera.last_seen,
+        "id": cam.id,
+        "name": cam.name,
+        "location": cam.location,
+        "rtsp_main": cam.rtsp_main,
+        "rtsp_sub": cam.rtsp_sub,
+        "storage_drive": cam.storage_drive,
+        "motion_enabled": cam.motion_enabled,
+        "retention_days": cam.retention_days,
+        "segment_duration": cam.config_json.get("segment_duration", 3600) if cam.config_json else 3600,
+        "status": "unknown",
+        "is_active": cam.is_active,
+        "sort_order": cam.sort_order,
+        "config_json": cam.config_json,
+        "last_seen": None,
     }
-    
     # Get real-time status from RecordingManager
     recording_manager = request.app.state.recording_manager
     if recording_manager:
