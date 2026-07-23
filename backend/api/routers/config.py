@@ -27,7 +27,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-router = APIRouter(prefix="/config", tags=["config"])
+# prefix "/config" sudah ditambahkan di app.py — jangan duplikat di sini
+router = APIRouter(tags=["config"])
 
 
 # Camera Configuration Endpoints
