@@ -40,13 +40,12 @@ async def _storage_status_response(request: Request):
     for status in drive_statuses:
         cameras = camera_map.get(status["path"], [])
         drives.append(DriveStatus(
-            mount=status["path"],
-            label=Path(status["path"]).name,
-            total_gb=status["total_gb"],
-            used_gb=status["used_gb"],
-            free_gb=status["free_gb"],
-            free_pct=status["free_pct"],
-            cameras=cameras,
+           path=status["path"],
+           total_gb=status["total_gb"],
+           used_gb=status["used_gb"],
+           free_gb=status["free_gb"],
+           free_pct=status["free_pct"],
+           cameras=cameras,
         ))
         total_tb += status["total_gb"] / 1024
         used_tb += status["used_gb"] / 1024
