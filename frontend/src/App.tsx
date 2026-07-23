@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
+﻿import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query'
 import { useAuthStore } from "@/store/auth"
 import { Sidebar } from "@/components/layout/Sidebar"
@@ -30,13 +30,12 @@ function ProtectedLayout() {
 
   if (!isAuthenticated) return <Navigate to="/login" replace />
 
-  // Redirect ke setup wizard jika belum ada kamera
   if (cameras !== undefined && cameras.length === 0 && location.pathname !== '/setup') {
     return <Navigate to="/setup" replace />
   }
 
   return (
-    <div className="flex h-screen bg-gray-950 text-white overflow-hidden">
+    <div className="flex h-screen bg-slate-100 text-slate-800 overflow-hidden">
       <Sidebar />
       <main className="flex-1 overflow-hidden">
         <Routes>

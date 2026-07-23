@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query'
+﻿import { useQuery } from '@tanstack/react-query'
 import { camerasApi } from '@/api/cameras'
 import { useCameraStore, GridSize } from '@/store/cameras'
 import { CameraGrid } from '@/components/camera/CameraGrid'
@@ -23,47 +23,41 @@ export default function LiveViewPage() {
 
   const online = cameras.filter((c: Camera) => c.status === 'online').length
   const total = cameras.length
-
-  // C-07: filter kamera berdasarkan search
   const filteredCameras = cameras.filter((c: Camera) =>
     c.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
     (c.location ?? '').toLowerCase().includes(searchTerm.toLowerCase())
   )
 
   return (
-    <div className="flex flex-col h-full p-2 gap-2">
+    <div className="flex flex-col h-full p-3 gap-3 bg-slate-100">
       {/* Toolbar */}
-      <div className="flex items-center gap-2 bg-gray-800 rounded px-3 py-2 flex-shrink-0 flex-wrap">
-        <span className="text-sm font-medium text-white">Live View</span>
-
-        {/* Status */}
-        <span className="text-xs text-green-400">
+      <div className="flex items-center gap-3 bg-white border border-slate-200 rounded-xl px-4 py-2.5 flex-shrink-0 flex-wrap shadow-sm">
+        <span className="text-sm font-semibold text-slate-700">📹 Live View</span>
+        <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${online > 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
           {online}/{total} online
         </span>
 
-        {/* C-07: Filter toggle */}
         <button
           onClick={() => setShowFilter(f => !f)}
-          className={`ml-1 px-2 py-1 text-xs rounded ${
-            showFilter ? 'bg-blue-600 text-white' : 'bg-gray-700 hover:bg-gray-600 text-gray-300'
+          className={`ml-1 px-3 py-1.5 text-xs rounded-lg font-medium transition-colors ${
+            showFilter ? 'bg-sky-600 text-white' : 'bg-slate-100 hover:bg-slate-200 text-slate-600 border border-slate-300'
           }`}
         >
           Filter Kamera ({selectedCameras.length})
         </button>
 
-        {/* Spacer */}
         <div className="flex-1" />
 
-        {/* C-06: Grid size selector */}
         <div className="flex gap-1">
           {GRIDS.map(g => (
             <button
               key={g}
               onClick={() => setGridSize(g)}
-              className={`px-2 py-1 text-xs rounded ${
-                gridSize === g ? 'bg-blue-600 text-white' : 'bg-gray-700 hover:bg-gray-600 text-gray-300'
+              className={`px-2.5 py-1.5 text-xs rounded-lg font-medium transition-colors ${
+                gridSize === g
+                  ? 'bg-sky-600 text-white shadow-sm'
+                  : 'bg-slate-100 hover:bg-slate-200 text-slate-600 border border-slate-300'
               }`}
-              title={`Layout ${g}`}
             >
               {g}
             </button>
@@ -71,46 +65,38 @@ export default function LiveViewPage() {
         </div>
       </div>
 
-      {/* C-07: Filter panel */}
+      {/* Filter panel */}
       {showFilter && (
-        <div className="bg-gray-800 rounded px-3 py-2 flex-shrink-0">
-          <div className="flex items-center gap-2 mb-2">
+        <div className="bg-white border border-slate-200 rounded-xl px-4 py-3 flex-shrink-0 shadow-sm">
+          <div className="flex items-center gap-2 mb-3">
             <input
               type="text"
               placeholder="Cari kamera atau lokasi..."
               value={searchTerm}
               onChange={e => setSearchTerm(e.target.value)}
-              className="flex-1 bg-gray-700 text-white text-xs px-2 py-1.5 rounded border border-gray-600 focus:outline-none focus:border-blue-500"
+              className="flex-1 bg-slate-50 text-slate-800 text-xs px-3 py-2 rounded-lg border border-slate-300 focus:outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-200"
             />
-            <button
-              onClick={selectAll}
-              className="px-2 py-1 text-xs bg-gray-700 hover:bg-gray-600 text-gray-300 rounded"
-            >
+            <button onClick={selectAll} className="px-3 py-2 text-xs bg-slate-100 hover:bg-slate-200 text-slate-600 border border-slate-300 rounded-lg font-medium">
               Pilih Semua
             </button>
-            <button
-              onClick={selectNone}
-              className="px-2 py-1 text-xs bg-gray-700 hover:bg-gray-600 text-gray-300 rounded"
-            >
+            <button onClick={selectNone} className="px-3 py-2 text-xs bg-slate-100 hover:bg-slate-200 text-slate-600 border border-slate-300 rounded-lg font-medium">
               Hapus Semua
             </button>
           </div>
-          <div className="flex flex-wrap gap-1 max-h-28 overflow-y-auto">
+          <div className="flex flex-wrap gap-1.5 max-h-28 overflow-y-auto">
             {filteredCameras.map((c: Camera) => (
               <button
                 key={c.id}
                 onClick={() => toggleSelected(c.id)}
-                className={`px-2 py-1 text-xs rounded flex items-center gap-1 ${
+                className={`px-3 py-1.5 text-xs rounded-lg flex items-center gap-1.5 font-medium border transition-colors ${
                   selectedCameras.includes(c.id)
-                    ? 'bg-blue-600 text-white'
-                    : 'bg-gray-700 text-gray-400 hover:bg-gray-600'
+                    ? 'bg-sky-600 text-white border-sky-600'
+                    : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'
                 }`}
               >
-                <span className={`w-1.5 h-1.5 rounded-full ${
-                  c.status === 'online' ? 'bg-green-400' : 'bg-red-400'
-                }`} />
+                <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${c.status === 'online' ? 'bg-emerald-400' : 'bg-red-400'}`} />
                 {c.name}
-                {c.location ? <span className="text-gray-400 text-[10px]">({c.location})</span> : null}
+                {c.location ? <span className="opacity-60">({c.location})</span> : null}
               </button>
             ))}
           </div>
@@ -118,7 +104,7 @@ export default function LiveViewPage() {
       )}
 
       {/* Grid */}
-      <div className="flex-1 overflow-hidden">
+      <div className="flex-1 overflow-hidden rounded-xl">
         <CameraGrid />
       </div>
     </div>
