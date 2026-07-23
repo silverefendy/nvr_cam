@@ -46,18 +46,18 @@ async def health_check(request: Request, _: User = Depends(get_current_user)):
         disk = {"total_gb": 0, "used_gb": 0, "free_gb": 0, "free_pct": 0}
     
     return {
-        "cpu_pct": get_cpu_percent(interval=0.1),
-        "ram_pct": ram["percent"],
+        "cpu_usage": get_cpu_percent(interval=0.1),      # was: cpu_pct
+        "ram_usage": ram["percent"],                       # was: ram_pct
         "ram_used_gb": ram["used_gb"],
         "ram_total_gb": ram["total_gb"],
-        "disk_pct": disk["free_pct"],
+        "disk_usage": round(100 - disk["free_pct"], 1),   # was: disk_pct (inverted!)
         "disk_used_gb": disk["used_gb"],
         "disk_total_gb": disk["total_gb"],
-        "uptime_s": int(get_uptime()),
+        "uptime_seconds": int(get_uptime()),               # was: uptime_s
         "services": services,
-        "camera_online": camera_online,
-        "camera_offline": camera_offline,
-        "camera_total": camera_total,
+        "cameras_online": camera_online,                   # was: camera_online
+        "cameras_offline": camera_offline,                 # was: camera_offline
+        "cameras_total": camera_total,
     }
 
 
