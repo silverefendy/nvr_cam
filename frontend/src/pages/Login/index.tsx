@@ -2,6 +2,7 @@ import React, { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { authApi } from "@/api/auth"
 import { useAuthStore } from "@/store/auth"
+
 export default function LoginPage() {
   const [username, setUsername] = useState("")
   const [password, setPassword] = useState("")
@@ -9,16 +10,20 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false)
   const { setAuth } = useAuthStore()
   const navigate = useNavigate()
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault(); setLoading(true); setError("")
     try {
       const token = await authApi.login(username, password)
+      // Simpan token dulu ke localStorage agar interceptor axios bisa pakai
+      localStorage.setItem("access_token", token.access_token)
       const user = await authApi.me()
       setAuth(user, token.access_token)
       navigate("/live")
     } catch { setError("Username atau password salah") }
     finally { setLoading(false) }
   }
+
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-900">
       <div className="w-80 bg-gray-800 rounded-lg p-6">
