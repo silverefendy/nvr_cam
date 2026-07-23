@@ -9,12 +9,18 @@ from backend.db.models.user import User
 router = APIRouter(tags=["storage"])
 
 
-@router.get("")
-async def get_storage_status(request: Request, _: User = Depends(get_current_user)):
-    """Ringkasan kapasitas semua drive yang terdaftar."""
+async def _storage_status_response(request: Request):
+    """Logika utama untuk endpoint status storage."""
     storage_manager = request.app.state.storage_manager
     if not storage_manager:
-        return {"drives": [], "total_tb": 0, "used_tb": 0, "free_tb": 0, "estimated_days_remaining": 0, "threshold_pct": 10}
+        return {
+            "drives": [],
+            "total_tb": 0,
+            "used_tb": 0,
+            "free_tb": 0,
+            "estimated_days_remaining": 0,
+            "threshold_pct": 10,
+        }
 
     drive_statuses = storage_manager.get_all_drives_status()
 
@@ -40,7 +46,7 @@ async def get_storage_status(request: Request, _: User = Depends(get_current_use
             used_gb=status["used_gb"],
             free_gb=status["free_gb"],
             free_pct=status["free_pct"],
-            cameras=cameras
+            cameras=cameras,
         ))
         total_tb += status["total_gb"] / 1024
         used_tb += status["used_gb"] / 1024
@@ -56,6 +62,18 @@ async def get_storage_status(request: Request, _: User = Depends(get_current_use
         "estimated_days_remaining": estimated_days,
         "threshold_pct": storage_manager.threshold_pct,
     }
+
+
+@router.get("")
+async def get_storage_status(request: Request, _: User = Depends(get_current_user)):
+    """Ringkasan kapasitas semua drive yang terdaftar."""
+    return await _storage_status_response(request)
+
+
+@router.get("/status")
+async def get_storage_status_alias(request: Request, _: User = Depends(get_current_user)):
+    """Alias /status → sama dengan GET /api/v1/storage (kompatibilitas frontend)."""
+    return await _storage_status_response(request)
 
 
 @router.get("/stats/cameras")
@@ -78,7 +96,6 @@ async def get_cleanup_schedule(request: Request, _: User = Depends(get_current_u
     """
     schedule = getattr(request.app.state, "cleanup_schedule", None)
     if schedule is None:
-        # Default: cleanup harian jam 03:00
         schedule = {
             "enabled": False,
             "cron": "0 3 * * *",
@@ -97,10 +114,6 @@ async def update_cleanup_schedule(
     """
     Update jadwal cleanup terjadwal (F-09).
     Body: {enabled: bool, hour: int, minute: int}
-
-    Catatan: perubahan jadwal berlaku saat loop background di-restart.
-    Untuk saat ini state disimpan di memory (app.state).
-    Persistent config bisa ditambahkan nanti via config/cleanup.yaml.
     """
     enabled = bool(body.get("enabled", False))
     hour = int(body.get("hour", 3))
