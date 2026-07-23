@@ -1,4 +1,4 @@
-services:
+﻿services:
   db:
     image: postgres:16-alpine
     container_name: cctv_db
@@ -41,6 +41,9 @@ services:
     container_name: cctv_web
     ports:
       - "3000:80"
+    volumes:
+      - hls_data:/var/lib/nvr_cam/hls:ro
+      - snapshot_data:/var/lib/nvr_cam/snapshots:ro
     depends_on:
       - api
     restart: unless-stopped

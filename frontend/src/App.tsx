@@ -15,7 +15,14 @@ import SystemPage   from "@/pages/System"
 import SetupPage    from "@/pages/Setup"
 
 const queryClient = new QueryClient({
-  defaultOptions: { queries: { retry: 1, staleTime: 30_000 } }
+  defaultOptions: {
+    queries: {
+      retry: 0,
+      staleTime: 60_000,
+      gcTime: 300_000,
+      refetchOnWindowFocus: false,
+    }
+  }
 })
 
 function ProtectedLayout() {

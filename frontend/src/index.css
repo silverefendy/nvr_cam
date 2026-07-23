@@ -1,4 +1,14 @@
-@tailwind base;
+﻿@tailwind base;
 @tailwind components;
 @tailwind utilities;
-body { margin:0; font-family:system-ui,sans-serif; background:#030712; color:#f9fafb; }
+
+body {
+  margin: 0;
+  font-family: system-ui, sans-serif;
+  background: #f1f5f9;
+  color: #1e293b;
+}
+
+* {
+  box-sizing: border-box;
+}
