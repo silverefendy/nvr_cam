@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
+import { apiClient } from '@/api/client'
 
 interface NotificationFormData {
   telegram_bot_token?: string
@@ -36,13 +37,11 @@ export const NotificationForm: React.FC<Props> = ({ initialData, onSave }) => {
   const { data: currentConfig } = useQuery({
     queryKey: ['notifications-config'],
     queryFn: async () => {
-      const response = await fetch('/api/v1/config/notifications')
-      if (!response.ok) throw new Error('Failed to fetch notifications config')
-      return response.json()
+      const res = await apiClient.get('/config/notifications')
+      return res.data
     },
   })
 
-  // Load initial data when config is fetched
   useEffect(() => {
     if (currentConfig && !initialData) {
       setFormData(currentConfig.data || {})
@@ -51,13 +50,8 @@ export const NotificationForm: React.FC<Props> = ({ initialData, onSave }) => {
 
   const updateMutation = useMutation({
     mutationFn: async (data: NotificationFormData) => {
-      const response = await fetch('/api/v1/config/notifications', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data),
-      })
-      if (!response.ok) throw new Error('Failed to update notifications')
-      return response.json()
+      const res = await apiClient.put('/config/notifications', data)
+      return res.data
     },
     onSuccess: () => {
       onSave(formData)
@@ -66,16 +60,11 @@ export const NotificationForm: React.FC<Props> = ({ initialData, onSave }) => {
 
   const testMutation = useMutation({
     mutationFn: async (type: 'telegram' | 'email') => {
-      const response = await fetch('/api/v1/config/notifications/test', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          [type]: true,
-          test_message: 'Test notification from NVR System',
-        }),
+      const res = await apiClient.post('/config/notifications/test', {
+        [type]: true,
+        test_message: 'Test notification from NVR System',
       })
-      if (!response.ok) throw new Error('Test failed')
-      return response.json()
+      return res.data
     },
   })
 

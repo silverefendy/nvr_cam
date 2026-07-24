@@ -1,7 +1,8 @@
-﻿import { useState } from 'react'
+import { useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import { buildDahuaRTSP, maskRTSPPassword } from '@/utils/rtsp'
 import { RTSPTestButton } from './RTSPTestButton'
+import { apiClient } from '@/api/client'
 
 interface CameraFormData {
   id?: string
@@ -42,16 +43,10 @@ export const CameraForm: React.FC<Props> = ({ initialData, storageDrives, onSave
 
   const saveMutation = useMutation({
     mutationFn: async (data: CameraFormData) => {
-      const token = localStorage.getItem('access_token')
       const isEdit = !!data.id
-      const url = isEdit ? `/api/v1/config/cameras/${data.id}` : '/api/v1/config/cameras'
-      const res = await fetch(url, {
-        method: isEdit ? 'PUT' : 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify(data),
-      })
-      if (!res.ok) throw new Error('Gagal menyimpan kamera')
-      return res.json()
+      const url = isEdit ? `/config/cameras/${data.id}` : '/config/cameras'
+      const res = await apiClient({ method: isEdit ? 'PUT' : 'POST', url, data })
+      return res.data
     },
     onSuccess: () => onSave(formData),
   })

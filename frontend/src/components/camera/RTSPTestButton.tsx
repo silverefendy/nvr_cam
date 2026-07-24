@@ -1,5 +1,6 @@
-﻿import React, { useState } from 'react'
+import React, { useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
+import { apiClient } from '@/api/client'
 
 interface RTSPTestResult {
   success: boolean
@@ -20,21 +21,15 @@ export const RTSPTestButton: React.FC<Props> = ({ rtspUrl, onResult, className =
 
   const testMutation = useMutation({
     mutationFn: async (url: string) => {
-      const token = localStorage.getItem('access_token')
-      const response = await fetch('/api/v1/config/cameras/test-connection', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-        },
-        body: JSON.stringify({ rtsp_url: url, timeout_s: 10 }),
+      const res = await apiClient.post('/config/cameras/test-connection', {
+        rtsp_url: url,
+        timeout_s: 10,
       })
-      if (!response.ok) throw new Error(`HTTP ${response.status}`)
-      return response.json() as Promise<RTSPTestResult>
+      return res.data as RTSPTestResult
     },
     onSuccess: (data) => { setResult(data); onResult?.(data) },
-    onError: (error) => {
-      const r = { success: false, message: error instanceof Error ? error.message : 'Unknown error' }
+    onError: (error: any) => {
+      const r = { success: false, message: error?.response?.data?.detail || error.message || 'Unknown error' }
       setResult(r); onResult?.(r)
     },
   })

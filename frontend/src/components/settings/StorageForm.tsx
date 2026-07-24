@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
+import { apiClient } from '@/api/client'
 
 interface DriveAssignment {
   drive: string
@@ -24,9 +25,8 @@ export const StorageForm: React.FC<Props> = ({ onSave }) => {
   const { data: storageConfig, isLoading } = useQuery({
     queryKey: ['storage-config'],
     queryFn: async () => {
-      const response = await fetch('/api/v1/config/storage')
-      if (!response.ok) throw new Error('Failed to fetch storage config')
-      return response.json()
+      const res = await apiClient.get('/config/storage')
+      return res.data
     },
   })
 
@@ -39,21 +39,15 @@ export const StorageForm: React.FC<Props> = ({ onSave }) => {
   const { data: storageStatus } = useQuery({
     queryKey: ['storage-status'],
     queryFn: async () => {
-      const response = await fetch('/api/v1/storage/status')
-      if (!response.ok) throw new Error('Failed to fetch storage status')
-      return response.json()
+      const res = await apiClient.get('/storage/status')
+      return res.data
     },
   })
 
   const updateMutation = useMutation({
     mutationFn: async (data: DriveAssignment[]) => {
-      const response = await fetch('/api/v1/config/storage', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ drive_assignments: data }),
-      })
-      if (!response.ok) throw new Error('Failed to update storage config')
-      return response.json()
+      const res = await apiClient.put('/config/storage', { drive_assignments: data })
+      return res.data
     },
     onSuccess: () => {
       onSave(assignments)
