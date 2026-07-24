@@ -40,9 +40,11 @@ export const CameraForm: React.FC<Props> = ({ initialData, storageDrives, onSave
     }
   )
   const [useCustomRTSP, setUseCustomRTSP] = useState(false)
+  const [errorMsg, setErrorMsg] = useState<string | null>(null)
 
   const saveMutation = useMutation({
     mutationFn: async (data: CameraFormData) => {
+      setErrorMsg(null)
       const isEdit = !!data.id
       if (isEdit) {
         const res = await apiClient.put(`/config/cameras/${data.id}`, data)
@@ -53,6 +55,18 @@ export const CameraForm: React.FC<Props> = ({ initialData, storageDrives, onSave
       }
     },
     onSuccess: () => onSave(formData),
+    onError: (err: any) => {
+      // Tampilkan pesan error dari backend ke user
+      const detail = err?.response?.data?.detail
+      if (typeof detail === 'string') {
+        setErrorMsg(detail)
+      } else if (Array.isArray(detail)) {
+        // FastAPI validation error — format: [{loc, msg, type}]
+        setErrorMsg(detail.map((d: any) => `${d.loc?.slice(1).join('.')} — ${d.msg}`).join('\n'))
+      } else {
+        setErrorMsg('Gagal menyimpan kamera. Periksa log untuk detail.')
+      }
+    },
   })
 
   const set = (field: keyof CameraFormData, value: any) =>
@@ -62,6 +76,22 @@ export const CameraForm: React.FC<Props> = ({ initialData, storageDrives, onSave
     buildDahuaRTSP(formData.ip_address, formData.port, formData.username, formData.password, formData.channel, 0)
   const rtspSub = useCustomRTSP ? (formData.rtsp_sub_custom || '') :
     buildDahuaRTSP(formData.ip_address, formData.port, formData.username, formData.password, formData.channel, 1)
+
+  // Validasi dasar sebelum submit
+  const validate = () => {
+    if (!formData.name.trim()) { setErrorMsg('Nama kamera wajib diisi.'); return false }
+    if (!formData.ip_address.trim() && !formData.rtsp_main_custom?.trim()) {
+      setErrorMsg('IP Address wajib diisi (atau gunakan Custom RTSP URL).')
+      return false
+    }
+    if (!formData.storage_drive) { setErrorMsg('Storage drive wajib dipilih.'); return false }
+    return true
+  }
+
+  const handleSubmit = () => {
+    if (!validate()) return
+    saveMutation.mutate(formData)
+  }
 
   return (
     <div className="bg-white border border-slate-200 rounded-2xl shadow-sm max-w-2xl mx-auto overflow-hidden">
@@ -74,6 +104,16 @@ export const CameraForm: React.FC<Props> = ({ initialData, storageDrives, onSave
       </div>
 
       <div className="p-6 space-y-6">
+
+        {/* Error banner */}
+        {errorMsg && (
+          <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 flex items-start gap-2">
+            <span className="text-red-500 text-sm mt-0.5 flex-shrink-0">⚠️</span>
+            <pre className="text-red-700 text-xs whitespace-pre-wrap font-sans">{errorMsg}</pre>
+            <button onClick={() => setErrorMsg(null)} className="ml-auto text-red-400 hover:text-red-600 text-xs flex-shrink-0">✕</button>
+          </div>
+        )}
+
         {/* Identitas Kamera */}
         <div>
           <div className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3 flex items-center gap-2">
@@ -85,7 +125,7 @@ export const CameraForm: React.FC<Props> = ({ initialData, storageDrives, onSave
             <div>
               <label className={labelCls}>Nama Kamera *</label>
               <input type="text" value={formData.name} onChange={e => set('name', e.target.value)}
-                placeholder="Pintu Masuk Utama" className={inputCls} required />
+                placeholder="Pintu Masuk Utama" className={inputCls} />
             </div>
             <div>
               <label className={labelCls}>Lokasi</label>
@@ -99,14 +139,14 @@ export const CameraForm: React.FC<Props> = ({ initialData, storageDrives, onSave
         <div>
           <div className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3 flex items-center gap-2">
             <span className="flex-1 h-px bg-slate-200" />
-            <span>Jaringan & Autentikasi</span>
+            <span>Jaringan &amp; Autentikasi</span>
             <span className="flex-1 h-px bg-slate-200" />
           </div>
           <div className="grid grid-cols-3 gap-4 mb-4">
             <div className="col-span-2">
               <label className={labelCls}>IP Address *</label>
               <input type="text" value={formData.ip_address} onChange={e => set('ip_address', e.target.value)}
-                placeholder="192.168.1.101" className={inputCls} required />
+                placeholder="192.168.1.101" className={inputCls} />
             </div>
             <div>
               <label className={labelCls}>Port</label>
@@ -123,7 +163,8 @@ export const CameraForm: React.FC<Props> = ({ initialData, storageDrives, onSave
             <div>
               <label className={labelCls}>Password *</label>
               <input type="password" value={formData.password} onChange={e => set('password', e.target.value)}
-                className={inputCls} required />
+                placeholder="••••••••"
+                className={inputCls} />
             </div>
             <div>
               <label className={labelCls}>Channel</label>
@@ -176,14 +217,14 @@ export const CameraForm: React.FC<Props> = ({ initialData, storageDrives, onSave
         <div>
           <div className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3 flex items-center gap-2">
             <span className="flex-1 h-px bg-slate-200" />
-            <span>Penyimpanan & Rekaman</span>
+            <span>Penyimpanan &amp; Rekaman</span>
             <span className="flex-1 h-px bg-slate-200" />
           </div>
           <div className="grid grid-cols-2 gap-4 mb-4">
             <div>
               <label className={labelCls}>Storage Drive *</label>
               <select value={formData.storage_drive} onChange={e => set('storage_drive', e.target.value)}
-                className={inputCls} required>
+                className={inputCls}>
                 {storageDrives.length === 0 && <option value="">— Belum ada drive —</option>}
                 {storageDrives.map(d => <option key={d} value={d}>{d}</option>)}
               </select>
@@ -207,14 +248,14 @@ export const CameraForm: React.FC<Props> = ({ initialData, storageDrives, onSave
         </div>
       </div>
 
-      {/* Footer Actions */}
+      {/* Footer */}
       <div className="px-6 py-4 border-t border-slate-200 bg-slate-50 flex justify-end gap-3">
         <button type="button" onClick={onCancel}
           className="px-5 py-2.5 rounded-xl text-sm font-medium text-slate-600 bg-white border border-slate-300 hover:bg-slate-100 transition-colors">
           Batal
         </button>
         <button
-          onClick={() => saveMutation.mutate(formData)}
+          onClick={handleSubmit}
           disabled={saveMutation.isPending}
           className="px-5 py-2.5 rounded-xl text-sm font-medium text-white bg-sky-600 hover:bg-sky-500 disabled:opacity-50 transition-colors shadow-sm">
           {saveMutation.isPending ? 'Menyimpan...' : formData.id ? '💾 Update Kamera' : '➕ Tambah Kamera'}
