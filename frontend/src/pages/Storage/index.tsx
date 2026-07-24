@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { storageApi } from "@/api/storage"
+import { useAuthStore } from "@/store/auth"
 import type { DriveStatus } from "@/types"
 
 type Tab = "drives" | "cameras" | "schedule"
@@ -12,23 +13,25 @@ export default function StoragePage() {
   const [schedEnabled, setSchedEnabled] = useState(false)
   const [message, setMessage]           = useState<{ type: "success" | "error"; text: string } | null>(null)
   const queryClient = useQueryClient()
+  const { isAuthenticated } = useAuthStore()
 
   const { data: storage, isLoading, refetch } = useQuery({
     queryKey:        ["storage"],
     queryFn:         storageApi.getStatus,
+    enabled:         isAuthenticated,   // jangan fetch sebelum token ada
     refetchInterval: 30000,
   })
 
   const { data: cameraStats, isLoading: statsLoading } = useQuery({
     queryKey: ["storage-camera-stats"],
     queryFn:  storageApi.getStatsByCamera,
-    enabled:  activeTab === "cameras",
+    enabled:  isAuthenticated && activeTab === "cameras",
   })
 
   const { data: schedule } = useQuery({
     queryKey: ["cleanup-schedule"],
     queryFn:  storageApi.getCleanupSchedule,
-    enabled:  activeTab === "schedule",
+    enabled:  isAuthenticated && activeTab === "schedule",
   })
 
   useEffect(() => {
@@ -65,86 +68,122 @@ export default function StoragePage() {
     }
   }
 
-  const getUsageColor = (p: number) => p < 10 ? "text-red-500" : p < 20 ? "text-yellow-500" : "text-green-500"
-  const getBarColor   = (p: number) => p < 10 ? "bg-red-500"  : p < 20 ? "bg-yellow-500"  : "bg-green-500"
+  const getUsageColor = (p: number) => p < 10 ? "text-red-600" : p < 25 ? "text-amber-500" : "text-emerald-600"
+  const getBarColor   = (p: number) => p < 10 ? "bg-red-500"  : p < 25 ? "bg-amber-400"  : "bg-emerald-500"
   const formatGB = (gb: number) => gb >= 1000 ? `${(gb / 1024).toFixed(1)} TB` : `${gb.toFixed(0)} GB`
   const formatMB = (mb: number) => mb >= 1024  ? `${(mb / 1024).toFixed(2)} GB` : `${mb.toFixed(0)} MB`
 
   const tabs: { id: Tab; label: string }[] = [
-    { id: "drives",   label: "📀 Drive" },
-    { id: "cameras",  label: "📷 Per Kamera" },
-    { id: "schedule", label: "⏰ Jadwal Cleanup" },
+    { id: "drives",   label: "Drive" },
+    { id: "cameras",  label: "Per Kamera" },
+    { id: "schedule", label: "Jadwal Cleanup" },
   ]
 
   return (
-    <div className="flex flex-col h-full p-4 gap-4">
-      <div className="flex items-center gap-4 bg-gray-800 rounded px-4 py-3 flex-shrink-0">
-        <span className="text-sm font-medium">Storage</span>
+    <div className="flex flex-col h-full p-4 gap-4 bg-slate-100">
+
+      {/* Header */}
+      <div className="flex items-center gap-4 bg-white border border-slate-200 rounded-xl px-4 py-3 shadow-sm flex-shrink-0">
+        <h1 className="text-sm font-semibold text-slate-700">Storage</h1>
         {message && (
-          <span className={`text-xs ${message.type === "success" ? "text-green-400" : "text-red-400"}`}>
+          <span className={`text-xs font-medium px-3 py-1 rounded-full ${
+            message.type === "success"
+              ? "bg-emerald-100 text-emerald-700"
+              : "bg-red-100 text-red-700"
+          }`}>
             {message.text}
           </span>
         )}
         <button
           onClick={handleCleanup}
           disabled={cleanupMutation.isPending}
-          className="ml-auto px-3 py-1 bg-red-600 hover:bg-red-700 disabled:bg-gray-600 rounded text-sm"
+          className="ml-auto px-3 py-1.5 bg-red-500 hover:bg-red-600 disabled:bg-slate-300 rounded-lg text-white text-xs font-medium transition-colors"
         >
-          {cleanupMutation.isPending ? "Cleaning..." : "🧹 Cleanup Sekarang"}
+          {cleanupMutation.isPending ? "Cleaning..." : "Cleanup Sekarang"}
         </button>
       </div>
 
-      <div className="flex gap-1 flex-shrink-0">
+      {/* Tabs */}
+      <div className="flex gap-1 flex-shrink-0 bg-white border border-slate-200 rounded-xl p-1 shadow-sm w-fit">
         {tabs.map(t => (
           <button
             key={t.id}
             onClick={() => setActiveTab(t.id)}
-            className={`px-4 py-2 rounded text-sm ${activeTab === t.id ? "bg-blue-600 text-white" : "bg-gray-800 hover:bg-gray-700 text-gray-300"}`}
+            className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+              activeTab === t.id
+                ? "bg-sky-600 text-white shadow-sm"
+                : "text-slate-500 hover:text-slate-700 hover:bg-slate-100"
+            }`}
           >
             {t.label}
           </button>
         ))}
       </div>
 
-      <div className="flex-1 overflow-auto bg-gray-900 rounded p-4">
+      {/* Content */}
+      <div className="flex-1 overflow-auto">
 
         {/* Tab: Drive */}
         {activeTab === "drives" && (
           isLoading ? (
-            <div className="flex items-center justify-center h-full text-gray-500">Loading...</div>
+            <div className="flex items-center justify-center h-40 text-slate-400 text-sm">Memuat data storage...</div>
           ) : !storage?.drives?.length ? (
-            <div className="flex items-center justify-center h-full text-gray-500">Tidak ada drive terkonfigurasi</div>
+            <div className="flex items-center justify-center h-40 text-slate-400 text-sm">Tidak ada drive terkonfigurasi</div>
           ) : (
             <div className="grid gap-4">
-              <div className="bg-gray-800 rounded p-3 flex gap-6 text-sm">
-                <span>Total: <b>{storage.total_tb} TB</b></span>
-                <span>Dipakai: <b>{storage.used_tb} TB</b></span>
-                <span className={storage.free_tb < 1 ? "text-red-400" : "text-green-400"}>
-                  Sisa: <b>{storage.free_tb} TB</b>
-                </span>
-                <span className="text-gray-400">Est. habis: ~{storage.estimated_days_remaining} hari</span>
+              {/* Summary Bar */}
+              <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm flex flex-wrap gap-6 text-sm">
+                <div>
+                  <p className="text-xs text-slate-400 mb-0.5">Total</p>
+                  <p className="font-semibold text-slate-700">{storage.total_tb} TB</p>
+                </div>
+                <div>
+                  <p className="text-xs text-slate-400 mb-0.5">Dipakai</p>
+                  <p className="font-semibold text-slate-700">{storage.used_tb} TB</p>
+                </div>
+                <div>
+                  <p className="text-xs text-slate-400 mb-0.5">Sisa</p>
+                  <p className={`font-semibold ${storage.free_tb < 1 ? "text-red-600" : "text-emerald-600"}`}>
+                    {storage.free_tb} TB
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs text-slate-400 mb-0.5">Estimasi habis</p>
+                  <p className="font-semibold text-slate-700">~{storage.estimated_days_remaining} hari</p>
+                </div>
               </div>
+
+              {/* Drive Cards */}
               {storage.drives.map((drive: DriveStatus) => (
-                <div key={drive.path} className="bg-gray-800 rounded p-4">
-                  <div className="flex items-center justify-between mb-3">
+                <div key={drive.path} className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
+                  <div className="flex items-start justify-between mb-3">
                     <div>
-                      <h3 className="font-medium">{drive.path}</h3>
-                      <p className="text-xs text-gray-400">{drive.camera_count ?? drive.cameras?.length ?? 0} kamera</p>
+                      <h3 className="font-semibold text-slate-700">{drive.path}</h3>
+                      <p className="text-xs text-slate-400 mt-0.5">
+                        {drive.cameras?.length ?? 0} kamera terdaftar
+                      </p>
                     </div>
                     <div className="text-right">
-                      <p className={`text-lg font-medium ${getUsageColor(drive.free_pct)}`}>
+                      <p className={`text-lg font-bold ${getUsageColor(drive.free_pct)}`}>
                         {drive.free_pct.toFixed(1)}% sisa
                       </p>
-                      <p className="text-xs text-gray-400">{formatGB(drive.free_gb)} / {formatGB(drive.total_gb)}</p>
+                      <p className="text-xs text-slate-400">{formatGB(drive.free_gb)} dari {formatGB(drive.total_gb)}</p>
                     </div>
                   </div>
-                  <div className="w-full bg-gray-700 rounded-full h-2 mb-3">
-                    <div className={`h-2 rounded-full transition-all ${getBarColor(drive.free_pct)}`} style={{ width: `${drive.free_pct}%` }} />
+                  <div className="w-full bg-slate-100 rounded-full h-2.5 mb-3">
+                    <div
+                      className={`h-2.5 rounded-full transition-all ${getBarColor(drive.free_pct)}`}
+                      style={{ width: `${drive.free_pct}%` }}
+                    />
                   </div>
-                  <div className="text-xs text-gray-400">
-                    Dipakai: {formatGB(drive.used_gb)} · Threshold: {storage.threshold_pct ?? 10}%
+                  <div className="flex items-center gap-3 text-xs text-slate-400">
+                    <span>Dipakai: {formatGB(drive.used_gb)}</span>
+                    <span>·</span>
+                    <span>Threshold: {storage.threshold_pct ?? 10}%</span>
                     {drive.free_pct < (storage.threshold_pct ?? 10) && (
-                      <span className="ml-2 text-red-400 font-medium">⚠ Di bawah threshold!</span>
+                      <span className="ml-1 px-2 py-0.5 bg-red-100 text-red-600 rounded-full font-medium">
+                        Di bawah threshold!
+                      </span>
                     )}
                   </div>
                 </div>
@@ -156,33 +195,33 @@ export default function StoragePage() {
         {/* Tab: Per Kamera */}
         {activeTab === "cameras" && (
           statsLoading ? (
-            <div className="flex items-center justify-center h-full text-gray-500">Loading...</div>
+            <div className="flex items-center justify-center h-40 text-slate-400 text-sm">Memuat statistik...</div>
           ) : !cameraStats?.length ? (
-            <div className="flex items-center justify-center h-full text-gray-500">Tidak ada data</div>
+            <div className="flex items-center justify-center h-40 text-slate-400 text-sm">Tidak ada data kamera</div>
           ) : (
-            <div>
-              <p className="text-xs text-gray-400 mb-3">
-                {cameraStats.length} kamera · diurutkan dari penggunaan disk terbesar
-              </p>
+            <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
+              <div className="px-4 py-3 border-b border-slate-100">
+                <p className="text-xs text-slate-400">{cameraStats.length} kamera · diurutkan dari penggunaan disk terbesar</p>
+              </div>
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="text-left text-xs text-gray-400 border-b border-gray-700">
-                    <th className="pb-2 pr-4">#</th>
-                    <th className="pb-2 pr-4">Kamera</th>
-                    <th className="pb-2 pr-4">Drive</th>
-                    <th className="pb-2 pr-4 text-right">File</th>
-                    <th className="pb-2 text-right">Ukuran</th>
+                  <tr className="text-left text-xs text-slate-400 bg-slate-50 border-b border-slate-100">
+                    <th className="px-4 py-2">#</th>
+                    <th className="px-4 py-2">Kamera</th>
+                    <th className="px-4 py-2">Drive</th>
+                    <th className="px-4 py-2 text-right">File</th>
+                    <th className="px-4 py-2 text-right">Ukuran</th>
                   </tr>
                 </thead>
                 <tbody>
                   {cameraStats.map((s: any, i: number) => (
-                    <tr key={s.camera_id} className="border-b border-gray-800 hover:bg-gray-800/50">
-                      <td className="py-2 pr-4 text-gray-500">{i + 1}</td>
-                      <td className="py-2 pr-4 font-medium">{s.camera_id}</td>
-                      <td className="py-2 pr-4 text-gray-400 text-xs">{s.drive}</td>
-                      <td className="py-2 pr-4 text-right text-gray-300">{s.file_count}</td>
-                      <td className="py-2 text-right">
-                        <span className={i < 3 ? "text-yellow-400 font-medium" : "text-gray-300"}>
+                    <tr key={s.camera_id} className="border-b border-slate-50 hover:bg-slate-50 transition-colors">
+                      <td className="px-4 py-2.5 text-slate-400 text-xs">{i + 1}</td>
+                      <td className="px-4 py-2.5 font-medium text-slate-700">{s.camera_id}</td>
+                      <td className="px-4 py-2.5 text-slate-400 text-xs">{s.drive}</td>
+                      <td className="px-4 py-2.5 text-right text-slate-600">{s.file_count}</td>
+                      <td className="px-4 py-2.5 text-right">
+                        <span className={i < 3 ? "text-amber-600 font-semibold" : "text-slate-600"}>
                           {formatMB(s.total_mb)}
                         </span>
                       </td>
@@ -196,20 +235,20 @@ export default function StoragePage() {
 
         {/* Tab: Jadwal Cleanup */}
         {activeTab === "schedule" && (
-          <div className="max-w-md space-y-6">
+          <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm max-w-md space-y-6">
             <div>
-              <h2 className="text-base font-semibold text-white mb-1">Jadwal Cleanup Otomatis</h2>
-              <p className="text-xs text-gray-400">
+              <h2 className="text-base font-semibold text-slate-700 mb-1">Jadwal Cleanup Otomatis</h2>
+              <p className="text-xs text-slate-400">
                 Cleanup terjadwal menghapus file terlama sesuai waktu yang ditentukan,
                 meski disk belum kritis — agar ruang selalu tersedia.
               </p>
             </div>
 
             <div className="flex items-center gap-3">
-              <span className="text-sm text-gray-300">Aktifkan cleanup terjadwal</span>
+              <span className="text-sm text-slate-600">Aktifkan cleanup terjadwal</span>
               <button
                 onClick={() => setSchedEnabled(!schedEnabled)}
-                className={`relative w-10 h-5 rounded-full transition-colors ${schedEnabled ? "bg-blue-600" : "bg-gray-600"}`}
+                className={`relative w-10 h-5 rounded-full transition-colors ${schedEnabled ? "bg-sky-500" : "bg-slate-300"}`}
               >
                 <span className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${schedEnabled ? "translate-x-5" : "translate-x-0.5"}`} />
               </button>
@@ -217,40 +256,40 @@ export default function StoragePage() {
 
             <div className={`space-y-4 ${!schedEnabled ? "opacity-40 pointer-events-none" : ""}`}>
               <div>
-                <label className="block text-sm text-gray-300 mb-1">Jam cleanup (HH : MM)</label>
+                <label className="block text-sm text-slate-600 mb-2 font-medium">Jam cleanup (HH : MM)</label>
                 <div className="flex items-center gap-2">
                   <input
                     type="number" min={0} max={23} value={schedHour}
                     onChange={e => setSchedHour(Number(e.target.value))}
-                    className="w-20 bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white text-center"
+                    className="w-20 bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-slate-700 text-center focus:outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
                   />
-                  <span className="text-gray-400 font-bold">:</span>
+                  <span className="text-slate-400 font-bold">:</span>
                   <input
                     type="number" min={0} max={59} value={schedMinute}
                     onChange={e => setSchedMinute(Number(e.target.value))}
-                    className="w-20 bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white text-center"
+                    className="w-20 bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-slate-700 text-center focus:outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
                   />
-                  <span className="text-xs text-gray-500">
+                  <span className="text-xs text-slate-400">
                     cron: {String(schedMinute).padStart(2,'0')} {String(schedHour).padStart(2,'0')} * * *
                   </span>
                 </div>
-                <p className="text-xs text-gray-500 mt-1">Disarankan jam 03:00 saat beban rendah</p>
+                <p className="text-xs text-slate-400 mt-1">Disarankan jam 03:00 saat beban rendah</p>
               </div>
             </div>
 
             <button
               onClick={() => scheduleMutation.mutate({ enabled: schedEnabled, hour: schedHour, minute: schedMinute })}
               disabled={scheduleMutation.isPending}
-              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 rounded text-sm"
+              className="px-4 py-2 bg-sky-600 hover:bg-sky-500 disabled:bg-slate-300 rounded-lg text-white text-sm font-medium transition-colors"
             >
               {scheduleMutation.isPending ? "Menyimpan..." : "Simpan Jadwal"}
             </button>
 
             {schedule && (
-              <div className="bg-gray-800 rounded p-3 text-xs text-gray-400 space-y-1">
-                <p>Status: <span className={schedule.enabled ? "text-green-400" : "text-gray-500"}>{schedule.enabled ? "✅ Aktif" : "⏸ Nonaktif"}</span></p>
-                <p>Cron: <code className="text-gray-300">{schedule.cron}</code></p>
-                <p className="text-yellow-400/70 pt-1">⚠ Berlaku setelah backend di-restart.</p>
+              <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 text-xs text-slate-500 space-y-1">
+                <p>Status: <span className={schedule.enabled ? "text-emerald-600 font-medium" : "text-slate-400"}>{schedule.enabled ? "Aktif" : "Nonaktif"}</span></p>
+                <p>Cron: <code className="text-slate-600 bg-slate-100 px-1 rounded">{schedule.cron}</code></p>
+                <p className="text-amber-500 pt-1">Berlaku setelah backend di-restart.</p>
               </div>
             )}
           </div>
