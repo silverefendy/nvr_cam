@@ -40,6 +40,32 @@ def _get_recording_manager():
     return RecordingManager.get_instance()
 
 
+async def _trigger_recorder_restart(camera_id: str):
+    """
+    Jalankan restart_camera sebagai background task.
+    Dibungkus fungsi terpisah agar bisa dipanggil dengan asyncio.create_task()
+    SETELAH DB commit selesai — tidak ada race condition.
+    """
+    try:
+        rm = _get_recording_manager()
+        await rm.restart_camera(camera_id)
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning(f"[{camera_id}] Gagal restart recorder: {e}")
+
+
+async def _trigger_recorder_stop(camera_id: str):
+    """Stop recorder di background setelah kamera dihapus dari DB."""
+    try:
+        rm = _get_recording_manager()
+        if camera_id in rm.recorders:
+            await rm.recorders[camera_id].stop()
+            rm.recorders.pop(camera_id, None)
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning(f"[{camera_id}] Gagal stop recorder: {e}")
+
+
 # ─── CAMERA ROUTES ────────────────────────────────────────────────────────────
 
 @router.get("/cameras", response_model=ConfigResponse)
@@ -161,14 +187,12 @@ async def create_camera_config(
         config_json=config_json,
     )
 
+    # repo.create() sudah commit — aman untuk trigger recorder setelah ini
     created = await repo.create(new_camera)
+    camera_id = created.id
 
-    # Langsung start recorder untuk kamera baru (non-blocking)
-    try:
-        rm = _get_recording_manager()
-        asyncio.create_task(rm.restart_camera(created.id))
-    except Exception:
-        pass  # Jangan gagalkan request; recorder akan diambil saat restart berikutnya
+    # Schedule recorder start SETELAH response dikirim (background task)
+    asyncio.create_task(_trigger_recorder_restart(camera_id))
 
     return ConfigResponse(data={"camera": {"id": created.id, "name": created.name}})
 
@@ -220,15 +244,12 @@ async def update_camera_config(
         if hasattr(existing, field):
             setattr(existing, field, value)
 
+    # Commit dulu — pastikan data baru sudah tersimpan sebelum recorder restart
     await db.commit()
     await db.refresh(existing)
 
-    # Restart recorder dengan konfigurasi terbaru (non-blocking)
-    try:
-        rm = _get_recording_manager()
-        asyncio.create_task(rm.restart_camera(camera_id))
-    except Exception:
-        pass
+    # Schedule recorder restart di background SETELAH commit
+    asyncio.create_task(_trigger_recorder_restart(camera_id))
 
     return ConfigResponse(data={"camera_id": camera_id})
 
@@ -249,14 +270,8 @@ async def delete_camera_config(
     if not deleted:
         raise HTTPException(status_code=500, detail="Gagal menghapus kamera")
 
-    # Stop recorder kamera yang dihapus (non-blocking)
-    try:
-        rm = _get_recording_manager()
-        if camera_id in rm.recorders:
-            asyncio.create_task(rm.recorders[camera_id].stop())
-            del rm.recorders[camera_id]
-    except Exception:
-        pass
+    # Stop recorder di background
+    asyncio.create_task(_trigger_recorder_stop(camera_id))
 
     return ConfigResponse(data={"camera_id": camera_id})
 
