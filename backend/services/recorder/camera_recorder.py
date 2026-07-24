@@ -1,54 +1,69 @@
 """
 CameraRecorder — satu instance per kamera.
 Mengelola FFmpeg process untuk recording dan HLS streaming.
+
+Catatan implementasi:
+- Pakai asyncio.create_subprocess_exec (BUKAN subprocess.Popen) agar tidak
+  memblokir event loop FastAPI saat menunggu FFmpeg.
+- HLS ditulis ke /var/lib/nvr_cam/hls/<camera_id>_sub/ agar Nginx bisa serve
+  langsung dari volume hls_data yang di-mount di docker-compose.yml.
 """
 import asyncio
-import subprocess
 from pathlib import Path
 from datetime import datetime, timezone
 from backend.core.logging import get_logger
-from backend.core.exceptions import CameraConnectionError
 from .ffmpeg_wrapper import build_record_command, build_hls_command
 
 logger = get_logger(__name__, service="recorder")
+
+# Path ini harus cocok dengan volume hls_data di docker-compose.yml
+# dan dengan path yang di-serve Nginx: /var/lib/nvr_cam/hls/
+HLS_BASE_DIR = Path("/var/lib/nvr_cam/hls")
 
 
 class CameraRecorder:
     def __init__(self, camera: dict):
         self.camera = camera
         self.camera_id = camera["id"]
-        self.record_process: subprocess.Popen | None = None
-        self.hls_process: subprocess.Popen | None = None
+        self._record_proc: asyncio.subprocess.Process | None = None
+        self._hls_proc: asyncio.subprocess.Process | None = None
         self.is_running = False
-        self._reconnect_delay = 30  # detik
+        self._reconnect_delay = 30
         self.current_file: str | None = None
         self.started_at: datetime | None = None
         self._last_seen: datetime | None = None
 
     async def start(self):
-        """Start recording dan HLS streaming untuk kamera ini."""
+        """Start recording dan HLS streaming secara concurrent (non-blocking)."""
         self.is_running = True
         self.started_at = datetime.now(timezone.utc)
+        # Jalankan kedua loop secara concurrent tanpa blocking event loop
         await asyncio.gather(
             self._run_recording_loop(),
             self._run_hls_loop(),
+            return_exceptions=True,
         )
 
     async def stop(self):
         """Stop semua proses FFmpeg dengan bersih."""
         self.is_running = False
-        for proc in [self.record_process, self.hls_process]:
-            if proc and proc.poll() is None:
-                proc.terminate()
+        for proc in [self._record_proc, self._hls_proc]:
+            if proc and proc.returncode is None:
                 try:
-                    proc.wait(timeout=10)
-                except subprocess.TimeoutExpired:
-                    proc.kill()
+                    proc.terminate()
+                    await asyncio.wait_for(proc.wait(), timeout=10)
+                except (asyncio.TimeoutError, ProcessLookupError):
+                    try:
+                        proc.kill()
+                    except ProcessLookupError:
+                        pass
+        self._record_proc = None
+        self._hls_proc = None
 
     async def _run_recording_loop(self):
-        """Loop recording dengan auto-reconnect jika FFmpeg mati."""
+        """Loop recording 24/7 dengan auto-reconnect."""
         from backend.services.recorder.manager import RecordingManager
-        
+
         while self.is_running:
             try:
                 output_dir = self._get_output_dir()
@@ -57,49 +72,73 @@ class CameraRecorder:
 
                 cmd = build_record_command(self.camera["rtsp_main"], output_pattern)
                 logger.info(f"[{self.camera_id}] Mulai recording")
-                self.record_process = subprocess.Popen(
-                    cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE
+
+                # asyncio.create_subprocess_exec — tidak blocking event loop
+                self._record_proc = await asyncio.create_subprocess_exec(
+                    *cmd,
+                    stdout=asyncio.subprocess.DEVNULL,
+                    stderr=asyncio.subprocess.PIPE,
                 )
-                
-                # Update camera status to online
+
+                # Update status online
                 manager = RecordingManager.get_instance()
                 await manager.update_camera_status(self.camera_id, "online")
                 self._last_seen = datetime.now(timezone.utc)
-                
-                # Tunggu sampai process mati
-                await asyncio.get_event_loop().run_in_executor(
-                    None, self.record_process.wait
-                )
-                
+
+                # Tunggu FFmpeg selesai (non-blocking)
+                _, stderr_bytes = await self._record_proc.communicate()
+                if stderr_bytes:
+                    last_err = stderr_bytes.decode(errors="replace").strip().splitlines()
+                    if last_err:
+                        logger.debug(f"[{self.camera_id}] FFmpeg stderr: {last_err[-1]}")
+
                 if self.is_running:
-                    logger.warning(f"[{self.camera_id}] FFmpeg mati, reconnect dalam {self._reconnect_delay}s")
+                    logger.warning(
+                        f"[{self.camera_id}] FFmpeg mati, reconnect dalam {self._reconnect_delay}s"
+                    )
                     await manager.update_camera_status(self.camera_id, "offline")
                     await asyncio.sleep(self._reconnect_delay)
+
+            except asyncio.CancelledError:
+                break
             except Exception as e:
-                logger.error(f"[{self.camera_id}] Error recording: {e}")
+                logger.error(f"[{self.camera_id}] Error recording loop: {e}")
                 if self.is_running:
                     await asyncio.sleep(self._reconnect_delay)
 
     async def _run_hls_loop(self):
-        """Loop HLS streaming untuk live view browser."""
-        hls_dir = f"/tmp/hls/{self.camera_id}"
-        Path(hls_dir).mkdir(parents=True, exist_ok=True)
+        """Loop HLS streaming untuk live view browser.
+
+        Output ditulis ke /var/lib/nvr_cam/hls/<camera_id>_sub/
+        sesuai dengan naming yang diharapkan Nginx dan frontend.
+        """
+        # Nama direktori harus cocok dengan yang diminta Nginx:
+        # /hls/cam_01_sub/index.m3u8 → /var/lib/nvr_cam/hls/cam_01_sub/
+        hls_dir = HLS_BASE_DIR / f"{self.camera_id}_sub"
+        hls_dir.mkdir(parents=True, exist_ok=True)
+
         while self.is_running:
             try:
-                cmd = build_hls_command(
-                    self.camera.get("rtsp_sub") or self.camera["rtsp_main"], hls_dir
+                rtsp_url = self.camera.get("rtsp_sub") or self.camera["rtsp_main"]
+                cmd = build_hls_command(rtsp_url, str(hls_dir))
+
+                self._hls_proc = await asyncio.create_subprocess_exec(
+                    *cmd,
+                    stdout=asyncio.subprocess.DEVNULL,
+                    stderr=asyncio.subprocess.PIPE,
                 )
-                self.hls_process = subprocess.Popen(
-                    cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE
-                )
-                await asyncio.get_event_loop().run_in_executor(
-                    None, self.hls_process.wait
-                )
+                await self._hls_proc.communicate()
+
                 if self.is_running:
+                    logger.warning(f"[{self.camera_id}] HLS stream putus, retry dalam 5s")
                     await asyncio.sleep(5)
+
+            except asyncio.CancelledError:
+                break
             except Exception as e:
-                logger.error(f"[{self.camera_id}] Error HLS: {e}")
-                await asyncio.sleep(10)
+                logger.error(f"[{self.camera_id}] Error HLS loop: {e}")
+                if self.is_running:
+                    await asyncio.sleep(10)
 
     def _get_output_dir(self) -> Path:
         drive = self.camera["storage_drive"]
@@ -108,7 +147,11 @@ class CameraRecorder:
 
     @property
     def is_alive(self) -> bool:
-        return self.record_process is not None and self.record_process.poll() is None
+        """True jika proses recording FFmpeg sedang aktif."""
+        return (
+            self._record_proc is not None
+            and self._record_proc.returncode is None
+        )
 
     @property
     def last_seen(self) -> datetime | None:
