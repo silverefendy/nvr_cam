@@ -1,5 +1,6 @@
-﻿from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File
 from fastapi.responses import Response
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.api.dependencies import get_current_admin_user
 from backend.api.schemas.config import (
@@ -17,6 +18,9 @@ from backend.api.schemas.config import (
     BackupListResponse,
     ConfigResponse,
 )
+from backend.db.base import get_db
+from backend.db.models.camera import Camera
+from backend.db.repositories.camera_repo import CameraRepository
 from backend.services.notifier.telegram import TelegramNotifier
 from backend.services.notifier.email import EmailNotifier
 from backend.utils.config_manager import config_manager
@@ -33,9 +37,30 @@ router = APIRouter(tags=["config"])
 # ─── CAMERA ROUTES ────────────────────────────────────────────────────────────
 
 @router.get("/cameras", response_model=ConfigResponse)
-async def get_cameras_config(_user=Depends(get_current_admin_user)):
-    cameras = await config_manager.get_cameras()
-    return ConfigResponse(data={"cameras": cameras})
+async def get_cameras_config(
+    db: AsyncSession = Depends(get_db),
+    _user=Depends(get_current_admin_user),
+):
+    """Ambil semua kamera dari database."""
+    repo = CameraRepository(db)
+    cameras = await repo.get_active_cameras()
+    cameras_list = [
+        {
+            "id": cam.id,
+            "name": cam.name,
+            "location": cam.location,
+            "rtsp_main": cam.rtsp_main,
+            "rtsp_sub": cam.rtsp_sub,
+            "storage_drive": cam.storage_drive,
+            "motion_enabled": cam.motion_enabled,
+            "retention_days": cam.retention_days,
+            "is_active": cam.is_active,
+            "sort_order": cam.sort_order,
+            "config_json": cam.config_json,
+        }
+        for cam in cameras
+    ]
+    return ConfigResponse(data={"cameras": cameras_list})
 
 
 # PENTING: route statis harus di atas route {camera_id}
@@ -61,78 +86,148 @@ async def test_rtsp_connection_adhoc(
 @router.post("/cameras", response_model=ConfigResponse)
 async def create_camera_config(
     camera: CameraConfigCreate,
+    db: AsyncSession = Depends(get_db),
     _user=Depends(get_current_admin_user),
 ):
+    """Tambah kamera baru ke database."""
+    repo = CameraRepository(db)
+
+    # Auto-generate ID jika tidak diisi
     if not camera.id:
-        existing = await config_manager.get_cameras()
+        existing = await repo.get_active_cameras()
         max_num = 0
         for cam in existing:
-            if cam.get("id", "").startswith("cam_"):
+            if cam.id.startswith("cam_"):
                 try:
-                    num = int(cam["id"].replace("cam_", ""))
+                    num = int(cam.id.replace("cam_", ""))
                     max_num = max(max_num, num)
                 except ValueError:
                     pass
         camera.id = f"cam_{max_num + 1:02d}"
 
+    # Cek duplikasi ID
+    existing_cam = await repo.get_by_id(camera.id)
+    if existing_cam:
+        raise HTTPException(status_code=409, detail=f"Camera ID '{camera.id}' sudah ada")
+
     camera_data = camera.model_dump()
+
+    # Build RTSP URL
     if not camera_data.get("rtsp_main_custom"):
-        camera_data["rtsp_main"] = _build_dahua_rtsp(
+        rtsp_main = _build_dahua_rtsp(
             camera_data["ip_address"], camera_data["port"],
             camera_data["username"], camera_data["password"],
             camera_data["channel"], 0,
         )
     else:
-        camera_data["rtsp_main"] = camera_data["rtsp_main_custom"]
+        rtsp_main = camera_data["rtsp_main_custom"]
 
     if not camera_data.get("rtsp_sub_custom"):
-        camera_data["rtsp_sub"] = _build_dahua_rtsp(
+        rtsp_sub = _build_dahua_rtsp(
             camera_data["ip_address"], camera_data["port"],
             camera_data["username"], camera_data["password"],
             camera_data["channel"], 1,
         )
     else:
-        camera_data["rtsp_sub"] = camera_data["rtsp_sub_custom"]
+        rtsp_sub = camera_data["rtsp_sub_custom"]
 
-    camera_data.pop("rtsp_main_custom", None)
-    camera_data.pop("rtsp_sub_custom", None)
+    # Simpan credential dan konfigurasi ke config_json
+    config_json = {
+        "ip_address": camera_data.get("ip_address"),
+        "port": camera_data.get("port"),
+        "username": camera_data.get("username"),
+        "password": camera_data.get("password"),
+        "channel": camera_data.get("channel"),
+        "motion_zones": camera_data.get("motion_zones"),
+    }
 
-    await config_manager.add_camera(camera_data)
-    return ConfigResponse(data={"camera": camera_data})
+    new_camera = Camera(
+        id=camera_data["id"],
+        name=camera_data["name"],
+        location=camera_data.get("location"),
+        rtsp_main=rtsp_main,
+        rtsp_sub=rtsp_sub,
+        storage_drive=camera_data["storage_drive"],
+        motion_enabled=camera_data.get("motion_enabled", False),
+        retention_days=camera_data.get("retention_days", 30),
+        is_active=True,
+        sort_order=camera_data.get("sort_order", 0),
+        config_json=config_json,
+    )
+
+    created = await repo.create(new_camera)
+    return ConfigResponse(data={"camera": {"id": created.id, "name": created.name}})
 
 
 @router.put("/cameras/{camera_id}", response_model=ConfigResponse)
 async def update_camera_config(
     camera_id: str,
     camera: CameraConfigUpdate,
+    db: AsyncSession = Depends(get_db),
     _user=Depends(get_current_admin_user),
 ):
+    """Update kamera yang sudah ada di database."""
+    repo = CameraRepository(db)
+    existing = await repo.get_by_id(camera_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail=f"Kamera '{camera_id}' tidak ditemukan")
+
     update_data = camera.model_dump(exclude_unset=True)
-    if any(k in update_data for k in ["ip_address", "port", "username", "password", "channel"]):
-        existing = await config_manager.get_cameras()
-        existing_cam = next((c for c in existing if c.get("id") == camera_id), None)
-        if not existing_cam:
-            raise HTTPException(status_code=404, detail="Camera not found")
-        merged = {**existing_cam, **update_data}
+
+    # Ambil credential lama dari config_json jika ada
+    old_config = existing.config_json or {}
+    ip = update_data.get("ip_address", old_config.get("ip_address"))
+    port = update_data.get("port", old_config.get("port", 554))
+    username = update_data.get("username", old_config.get("username", "admin"))
+    password = update_data.get("password", old_config.get("password", ""))
+    channel = update_data.get("channel", old_config.get("channel", 1))
+
+    # Rebuild RTSP jika ada perubahan credential/koneksi
+    need_rtsp_rebuild = any(k in update_data for k in ["ip_address", "port", "username", "password", "channel"])
+    if need_rtsp_rebuild and ip:
         if not update_data.get("rtsp_main_custom"):
-            update_data["rtsp_main"] = _build_dahua_rtsp(
-                merged["ip_address"], merged["port"],
-                merged["username"], merged["password"], merged["channel"], 0,
-            )
+            update_data["rtsp_main"] = _build_dahua_rtsp(ip, port, username, password, channel, 0)
         if not update_data.get("rtsp_sub_custom"):
-            update_data["rtsp_sub"] = _build_dahua_rtsp(
-                merged["ip_address"], merged["port"],
-                merged["username"], merged["password"], merged["channel"], 1,
-            )
-    update_data.pop("rtsp_main_custom", None)
-    update_data.pop("rtsp_sub_custom", None)
-    await config_manager.update_camera(camera_id, update_data)
+            update_data["rtsp_sub"] = _build_dahua_rtsp(ip, port, username, password, channel, 1)
+
+    if update_data.get("rtsp_main_custom"):
+        update_data["rtsp_main"] = update_data.pop("rtsp_main_custom")
+    if update_data.get("rtsp_sub_custom"):
+        update_data["rtsp_sub"] = update_data.pop("rtsp_sub_custom")
+
+    # Update config_json dengan credential terbaru
+    new_config_json = {**old_config}
+    for field in ["ip_address", "port", "username", "password", "channel", "motion_zones"]:
+        if field in update_data:
+            new_config_json[field] = update_data.pop(field)
+    update_data["config_json"] = new_config_json
+
+    # Terapkan update ke model
+    for field, value in update_data.items():
+        if hasattr(existing, field):
+            setattr(existing, field, value)
+
+    await db.commit()
+    await db.refresh(existing)
     return ConfigResponse(data={"camera_id": camera_id})
 
 
 @router.delete("/cameras/{camera_id}", response_model=ConfigResponse)
-async def delete_camera_config(camera_id: str, _user=Depends(get_current_admin_user)):
-    await config_manager.delete_camera(camera_id)
+async def delete_camera_config(
+    camera_id: str,
+    db: AsyncSession = Depends(get_db),
+    _user=Depends(get_current_admin_user),
+):
+    """Hapus kamera dari database."""
+    repo = CameraRepository(db)
+    existing = await repo.get_by_id(camera_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail=f"Kamera '{camera_id}' tidak ditemukan")
+
+    deleted = await repo.delete_by_id(camera_id)
+    if not deleted:
+        raise HTTPException(status_code=500, detail="Gagal menghapus kamera")
+
     return ConfigResponse(data={"camera_id": camera_id})
 
 
@@ -314,7 +409,6 @@ async def _test_rtsp_connection(rtsp_url: str, timeout: int) -> dict[str, Any]:
         stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout + 2)
         if process.returncode != 0:
             err = stderr.decode(errors="replace").strip()
-            # Ambil baris error terakhir yang bermakna
             lines = [l for l in err.splitlines() if l.strip()]
             short_err = lines[-1] if lines else "FFprobe error"
             return {"success": False, "message": short_err}
@@ -323,7 +417,6 @@ async def _test_rtsp_connection(rtsp_url: str, timeout: int) -> dict[str, Any]:
         codec = stream.get("codec_name", "unknown")
         width, height = stream.get("width"), stream.get("height")
         fps = stream.get("r_frame_rate", "")
-        # Konversi fps dari format fraction "30000/1001" atau "5/1" ke float
         fps_float = None
         if fps:
             try:
