@@ -44,9 +44,13 @@ export const CameraForm: React.FC<Props> = ({ initialData, storageDrives, onSave
   const saveMutation = useMutation({
     mutationFn: async (data: CameraFormData) => {
       const isEdit = !!data.id
-      const url = isEdit ? `/config/cameras/${data.id}` : '/config/cameras'
-      const res = await apiClient({ method: isEdit ? 'PUT' : 'POST', url, data })
-      return res.data
+      if (isEdit) {
+        const res = await apiClient.put(`/config/cameras/${data.id}`, data)
+        return res.data
+      } else {
+        const res = await apiClient.post('/config/cameras', data)
+        return res.data
+      }
     },
     onSuccess: () => onSave(formData),
   })

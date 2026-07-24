@@ -18,7 +18,7 @@ export default function StoragePage() {
   const { data: storage, isLoading, refetch } = useQuery({
     queryKey:        ["storage"],
     queryFn:         storageApi.getStatus,
-    enabled:         isAuthenticated,   // jangan fetch sebelum token ada
+    enabled:         isAuthenticated,
     refetchInterval: 30000,
   })
 

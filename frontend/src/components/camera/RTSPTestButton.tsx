@@ -20,13 +20,10 @@ export const RTSPTestButton: React.FC<Props> = ({ rtspUrl, onResult, className =
   const [result, setResult] = useState<RTSPTestResult | null>(null)
 
   const testMutation = useMutation({
-    mutationFn: async (url: string) => {
-      const res = await apiClient.post('/config/cameras/test-connection', {
-        rtsp_url: url,
-        timeout_s: 10,
-      })
-      return res.data as RTSPTestResult
-    },
+    mutationFn: (url: string) =>
+      apiClient
+        .post<RTSPTestResult>('/config/cameras/test-connection', { rtsp_url: url, timeout_s: 10 })
+        .then(r => r.data),
     onSuccess: (data) => { setResult(data); onResult?.(data) },
     onError: (error: any) => {
       const r = { success: false, message: error?.response?.data?.detail || error.message || 'Unknown error' }
