@@ -1,8 +1,7 @@
-﻿import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
-import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query'
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useAuthStore } from "@/store/auth"
 import { Sidebar } from "@/components/layout/Sidebar"
-import { camerasApi } from "@/api/cameras"
 import LoginPage    from "@/pages/Login"
 import LiveViewPage from "@/pages/LiveView"
 import PlaybackPage from "@/pages/Playback"
@@ -27,19 +26,8 @@ const queryClient = new QueryClient({
 
 function ProtectedLayout() {
   const { isAuthenticated } = useAuthStore()
-  const location = useLocation()
-
-  const { data: cameras } = useQuery({
-    queryKey: ['cameras'],
-    queryFn: camerasApi.list,
-    enabled: isAuthenticated,
-  })
 
   if (!isAuthenticated) return <Navigate to="/login" replace />
-
-  if (cameras !== undefined && cameras.length === 0 && location.pathname !== '/setup') {
-    return <Navigate to="/setup" replace />
-  }
 
   return (
     <div className="flex h-screen bg-slate-100 text-slate-800 overflow-hidden">
@@ -55,7 +43,7 @@ function ProtectedLayout() {
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/system"   element={<SystemPage />} />
           <Route path="/setup"    element={<SetupPage />} />
-          <Route path="*"         element={<Navigate to="/live" replace />} />
+          <Route path="*"         element={<Navigate to="/cameras" replace />} />
         </Routes>
       </main>
     </div>
