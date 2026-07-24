@@ -34,6 +34,12 @@ from typing import Any
 router = APIRouter(tags=["config"])
 
 
+def _get_recording_manager():
+    """Lazy import untuk hindari circular import."""
+    from backend.services.recorder.manager import RecordingManager
+    return RecordingManager.get_instance()
+
+
 # ─── CAMERA ROUTES ────────────────────────────────────────────────────────────
 
 @router.get("/cameras", response_model=ConfigResponse)
@@ -89,7 +95,7 @@ async def create_camera_config(
     db: AsyncSession = Depends(get_db),
     _user=Depends(get_current_admin_user),
 ):
-    """Tambah kamera baru ke database."""
+    """Tambah kamera baru ke database, lalu langsung start recorder."""
     repo = CameraRepository(db)
 
     # Auto-generate ID jika tidak diisi
@@ -131,7 +137,7 @@ async def create_camera_config(
     else:
         rtsp_sub = camera_data["rtsp_sub_custom"]
 
-    # Simpan credential dan konfigurasi ke config_json
+    # Simpan credential ke config_json
     config_json = {
         "ip_address": camera_data.get("ip_address"),
         "port": camera_data.get("port"),
@@ -156,6 +162,14 @@ async def create_camera_config(
     )
 
     created = await repo.create(new_camera)
+
+    # Langsung start recorder untuk kamera baru (non-blocking)
+    try:
+        rm = _get_recording_manager()
+        asyncio.create_task(rm.restart_camera(created.id))
+    except Exception:
+        pass  # Jangan gagalkan request; recorder akan diambil saat restart berikutnya
+
     return ConfigResponse(data={"camera": {"id": created.id, "name": created.name}})
 
 
@@ -166,7 +180,7 @@ async def update_camera_config(
     db: AsyncSession = Depends(get_db),
     _user=Depends(get_current_admin_user),
 ):
-    """Update kamera yang sudah ada di database."""
+    """Update kamera di database, lalu restart recorder-nya."""
     repo = CameraRepository(db)
     existing = await repo.get_by_id(camera_id)
     if not existing:
@@ -174,7 +188,7 @@ async def update_camera_config(
 
     update_data = camera.model_dump(exclude_unset=True)
 
-    # Ambil credential lama dari config_json jika ada
+    # Ambil credential lama dari config_json
     old_config = existing.config_json or {}
     ip = update_data.get("ip_address", old_config.get("ip_address"))
     port = update_data.get("port", old_config.get("port", 554))
@@ -202,13 +216,20 @@ async def update_camera_config(
             new_config_json[field] = update_data.pop(field)
     update_data["config_json"] = new_config_json
 
-    # Terapkan update ke model
     for field, value in update_data.items():
         if hasattr(existing, field):
             setattr(existing, field, value)
 
     await db.commit()
     await db.refresh(existing)
+
+    # Restart recorder dengan konfigurasi terbaru (non-blocking)
+    try:
+        rm = _get_recording_manager()
+        asyncio.create_task(rm.restart_camera(camera_id))
+    except Exception:
+        pass
+
     return ConfigResponse(data={"camera_id": camera_id})
 
 
@@ -218,7 +239,7 @@ async def delete_camera_config(
     db: AsyncSession = Depends(get_db),
     _user=Depends(get_current_admin_user),
 ):
-    """Hapus kamera dari database."""
+    """Hapus kamera dari database, lalu stop recorder-nya."""
     repo = CameraRepository(db)
     existing = await repo.get_by_id(camera_id)
     if not existing:
@@ -227,6 +248,15 @@ async def delete_camera_config(
     deleted = await repo.delete_by_id(camera_id)
     if not deleted:
         raise HTTPException(status_code=500, detail="Gagal menghapus kamera")
+
+    # Stop recorder kamera yang dihapus (non-blocking)
+    try:
+        rm = _get_recording_manager()
+        if camera_id in rm.recorders:
+            asyncio.create_task(rm.recorders[camera_id].stop())
+            del rm.recorders[camera_id]
+    except Exception:
+        pass
 
     return ConfigResponse(data={"camera_id": camera_id})
 
