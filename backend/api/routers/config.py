@@ -323,12 +323,24 @@ async def _test_rtsp_connection(rtsp_url: str, timeout: int) -> dict[str, Any]:
         codec = stream.get("codec_name", "unknown")
         width, height = stream.get("width"), stream.get("height")
         fps = stream.get("r_frame_rate", "")
+        # Konversi fps dari format fraction "30000/1001" atau "5/1" ke float
+        fps_float = None
+        if fps:
+            try:
+                if "/" in str(fps):
+                    num, den = fps.split("/")
+                    fps_float = round(float(num) / float(den), 2) if float(den) != 0 else None
+                else:
+                    fps_float = float(fps)
+            except Exception:
+                fps_float = None
+
         return {
             "success": True,
             "message": "Koneksi RTSP berhasil",
             "codec": codec,
             "resolution": f"{width}x{height}" if width and height else None,
-            "fps": fps,
+            "fps": fps_float,
         }
     except asyncio.TimeoutError:
         return {"success": False, "message": f"Timeout setelah {timeout}s — periksa IP/port kamera"}

@@ -9,3 +9,17 @@ cameras:
   retention_days: 14
   sort_order: 2
   config_json: null
+- id: cam_03
+  name: Test Cam
+  location: null
+  ip_address: 10.1.0.150
+  port: 554
+  username: admin
+  password: admin123
+  channel: 1
+  storage_drive: /mnt/driveE
+  motion_enabled: false
+  retention_days: 30
+  motion_zones: null
+  rtsp_main: rtsp://admin:admin123@10.1.0.150:554/cam/realmonitor?channel=1&subtype=0
+  rtsp_sub: rtsp://admin:admin123@10.1.0.150:554/cam/realmonitor?channel=1&subtype=1
