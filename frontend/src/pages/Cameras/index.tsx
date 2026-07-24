@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
+import { apiClient } from '@/api/client'
 import { CameraForm } from "@/components/camera/CameraForm"
 import type { Camera } from "@/types"
 import { useEffect } from 'react'
@@ -22,20 +23,15 @@ export default function CamerasPage() {
   const { data: storageDrives } = useQuery({
     queryKey: ["storage-drives"],
     queryFn: async () => {
-      const response = await fetch('/api/v1/storage/status')
-      if (!response.ok) throw new Error('Failed to fetch storage drives')
-      const data = await response.json()
-      return data.drives?.map((d: any) => d.path) || []
+      const res = await apiClient.get('/storage/status')
+      return res.data?.drives?.map((d: any) => d.path) || []
     },
   })
 
   const deleteMutation = useMutation({
     mutationFn: async (id: string) => {
-      const response = await fetch(`/api/v1/config/cameras/${id}`, {
-        method: 'DELETE',
-      })
-      if (!response.ok) throw new Error('Failed to delete camera')
-      return response.json()
+      const res = await apiClient.delete(`/config/cameras/${id}`)
+      return res.data
     },
   })
 
