@@ -2,20 +2,20 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { apiClient } from '@/api/client'
 import { CameraForm } from "@/components/camera/CameraForm"
-import type { Camera } from "@/types"
-import { useEffect } from 'react'
 
 export default function CamerasPage() {
   const [showForm, setShowForm] = useState(false)
-  const [editingCamera, setEditingCamera] = useState<Camera | null>(null)
+  const [editingCamera, setEditingCamera] = useState<any | null>(null)
   const queryClient = useQueryClient()
 
+  // Gunakan /cameras (bukan /config/cameras) agar dapat field is_online dari RecordingManager
   const { data: cameras, isLoading } = useQuery({
-    queryKey: ["cameras"],
+    queryKey: ["cameras-list"],
     queryFn: async () => {
-      const res = await apiClient.get('/config/cameras')
-      return res.data?.data?.cameras || []
-    }
+      const res = await apiClient.get('/cameras')
+      return res.data || []
+    },
+    refetchInterval: 10_000,   // refresh status online/offline setiap 10 detik
   })
 
   const { data: storageDrives } = useQuery({
@@ -32,22 +32,16 @@ export default function CamerasPage() {
       return res.data
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["cameras"] })
+      queryClient.invalidateQueries({ queryKey: ["cameras-list"] })
     },
   })
-
-  useEffect(() => {
-    if (deleteMutation.isSuccess) {
-      queryClient.invalidateQueries({ queryKey: ["cameras"] })
-    }
-  }, [deleteMutation.isSuccess, queryClient])
 
   const handleAdd = () => {
     setEditingCamera(null)
     setShowForm(true)
   }
 
-  const handleEdit = (camera: Camera) => {
+  const handleEdit = (camera: any) => {
     setEditingCamera(camera)
     setShowForm(true)
   }
@@ -66,27 +60,29 @@ export default function CamerasPage() {
   const handleFormSave = () => {
     setShowForm(false)
     setEditingCamera(null)
-    queryClient.invalidateQueries({ queryKey: ["cameras"] })
+    queryClient.invalidateQueries({ queryKey: ["cameras-list"] })
   }
 
   const onlineCount = cameras?.filter((c: any) => c.is_online).length || 0
   const offlineCount = cameras?.filter((c: any) => !c.is_online).length || 0
 
   if (showForm) {
+    // Ambil credential dari config_json (disimpan saat kamera dibuat/diupdate)
+    const cfg = editingCamera?.config_json || {}
     return (
       <div className="flex flex-col h-full p-4">
         <CameraForm
           initialData={editingCamera ? {
             id: editingCamera.id,
             name: editingCamera.name,
-            location: editingCamera.location,
-            ip_address: editingCamera.rtsp_main?.match(/@([^:]+):/)?.[1] || '',
-            port: 554,
-            username: 'admin',
-            password: '',
-            channel: 1,
+            location: editingCamera.location || '',
+            ip_address: cfg.ip_address || editingCamera.rtsp_main?.match(/@([^:@]+):/)?.[1] || '',
+            port: cfg.port || 554,
+            username: cfg.username || 'admin',
+            password: cfg.password || '',   // ← ambil dari config_json, bukan string kosong
+            channel: cfg.channel || 1,
             storage_drive: editingCamera.storage_drive,
-            motion_enabled: editingCamera.motion_enabled,
+            motion_enabled: editingCamera.motion_enabled ?? false,
             retention_days: editingCamera.retention_days || 30,
           } : undefined}
           storageDrives={storageDrives || []}
@@ -137,12 +133,12 @@ export default function CamerasPage() {
             <tbody>
               {cameras.map((camera: any) => (
                 <tr key={camera.id} className="border-b border-gray-800 hover:bg-gray-800/50">
-                  <td className="px-4 py-2 text-gray-300">{camera.id}</td>
+                  <td className="px-4 py-2 text-gray-300 font-mono">{camera.id}</td>
                   <td className="px-4 py-2 text-white">{camera.name}</td>
                   <td className="px-4 py-2 text-gray-400">{camera.location || "-"}</td>
                   <td className="px-4 py-2">
-                    <span className={camera.is_online ? "text-green-400" : "text-red-400"}>
-                      {camera.is_online ? "Online" : "Offline"}
+                    <span className={camera.is_online ? "text-green-400 font-medium" : "text-red-400"}>
+                      {camera.is_online ? "● Online" : "○ Offline"}
                     </span>
                   </td>
                   <td className="px-4 py-2 text-gray-300">{camera.storage_drive}</td>
@@ -152,12 +148,15 @@ export default function CamerasPage() {
                     </span>
                   </td>
                   <td className="px-4 py-2 text-gray-400">{camera.retention_days || 30} days</td>
-                  <td className="px-4 py-2">
-                    <button onClick={() => handleEdit(camera)} className="text-blue-400 hover:underline mr-2">Edit</button>
+                  <td className="px-4 py-2 flex gap-2">
+                    <button
+                      onClick={() => handleEdit(camera)}
+                      className="px-2 py-0.5 text-xs text-blue-400 border border-blue-800 rounded hover:bg-blue-900/40"
+                    >Edit</button>
                     <button
                       onClick={() => handleDelete(camera.id)}
                       disabled={deleteMutation.isPending}
-                      className="text-red-400 hover:underline disabled:opacity-40"
+                      className="px-2 py-0.5 text-xs text-red-400 border border-red-900 rounded hover:bg-red-900/40 disabled:opacity-40"
                     >Delete</button>
                   </td>
                 </tr>
