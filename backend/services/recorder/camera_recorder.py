@@ -7,12 +7,15 @@ Catatan implementasi:
   memblokir event loop FastAPI saat menunggu FFmpeg.
 - HLS ditulis ke /var/lib/nvr_cam/hls/<camera_id>_sub/ agar Nginx bisa serve
   langsung dari volume hls_data yang di-mount di docker-compose.yml.
+- Codec HEVC (H.265) dari kamera fisik tidak didukung hls.js di browser.
+  Recorder otomatis deteksi codec via ffprobe dan aktifkan transcode ke H.264
+  jika diperlukan.
 """
 import asyncio
 from pathlib import Path
 from datetime import datetime, timezone
 from backend.core.logging import get_logger
-from .ffmpeg_wrapper import build_record_command, build_hls_command
+from .ffmpeg_wrapper import build_record_command, build_hls_command, detect_video_codec
 
 logger = get_logger(__name__, service="recorder")
 
@@ -111,23 +114,55 @@ class CameraRecorder:
 
         Output ditulis ke /var/lib/nvr_cam/hls/<camera_id>_sub/
         sesuai dengan naming yang diharapkan Nginx dan frontend.
+
+        Otomatis deteksi codec via ffprobe saat pertama start:
+        - HEVC/H.265 → transcode ke H.264 (kompatibel hls.js di semua browser)
+        - H.264 → stream copy (hemat CPU)
         """
         # Nama direktori harus cocok dengan yang diminta Nginx:
         # /hls/cam_01_sub/index.m3u8 → /var/lib/nvr_cam/hls/cam_01_sub/
         hls_dir = HLS_BASE_DIR / f"{self.camera_id}_sub"
         hls_dir.mkdir(parents=True, exist_ok=True)
 
+        rtsp_url = self.camera.get("rtsp_sub") or self.camera["rtsp_main"]
+
+        # Probe codec sekali saat pertama loop — run_in_executor agar tidak block
+        loop = asyncio.get_event_loop()
+        codec = await loop.run_in_executor(None, detect_video_codec, rtsp_url)
+        force_transcode = codec in ("hevc", "h265")
+
+        if force_transcode:
+            logger.info(
+                f"[{self.camera_id}] Codec HEVC terdeteksi ({codec!r}) "
+                f"→ aktifkan transcode H.264 untuk kompatibilitas browser"
+            )
+        else:
+            logger.info(
+                f"[{self.camera_id}] Codec: {codec or 'unknown'} → stream copy (tanpa transcode)"
+            )
+
         while self.is_running:
             try:
-                rtsp_url = self.camera.get("rtsp_sub") or self.camera["rtsp_main"]
-                cmd = build_hls_command(rtsp_url, str(hls_dir))
+                cmd = build_hls_command(
+                    rtsp_url,
+                    str(hls_dir),
+                    force_transcode=force_transcode,
+                )
 
                 self._hls_proc = await asyncio.create_subprocess_exec(
                     *cmd,
                     stdout=asyncio.subprocess.DEVNULL,
                     stderr=asyncio.subprocess.PIPE,
                 )
-                await self._hls_proc.communicate()
+
+                # Log stderr FFmpeg agar mudah debug (dulu DEVNULL — tidak terlog sama sekali)
+                _, stderr_bytes = await self._hls_proc.communicate()
+                if stderr_bytes:
+                    err_lines = stderr_bytes.decode(errors="replace").strip().splitlines()
+                    if err_lines:
+                        logger.warning(
+                            f"[{self.camera_id}] HLS FFmpeg stderr: {err_lines[-1]}"
+                        )
 
                 if self.is_running:
                     logger.warning(f"[{self.camera_id}] HLS stream putus, retry dalam 5s")
