@@ -4,7 +4,7 @@ Pattern Repository: pisahkan logic DB dari logic bisnis.
 """
 from typing import TypeVar, Generic, Type
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, delete
+from sqlalchemy import select
 from backend.db.base import Base
 
 ModelType = TypeVar("ModelType", bound=Base)
@@ -24,7 +24,7 @@ class BaseRepository(Generic[ModelType]):
 
     async def create(self, obj: ModelType) -> ModelType:
         self.db.add(obj)
-        await self.db.flush()
+        await self.db.commit()       # ← wajib commit agar tersimpan permanen
         await self.db.refresh(obj)
         return obj
 
@@ -32,5 +32,6 @@ class BaseRepository(Generic[ModelType]):
         obj = await self.get_by_id(id)
         if obj:
             await self.db.delete(obj)
+            await self.db.commit()   # ← wajib commit agar penghapusan permanen
             return True
         return False
