@@ -29,6 +29,8 @@
       - snapshot_data:/var/lib/nvr_cam/snapshots
     ports:
       - "8000:8000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       db:
         condition: service_healthy
