@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File
+﻿from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File
 from fastapi.responses import Response
 
 from backend.api.dependencies import get_current_admin_user
@@ -27,7 +27,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-# prefix "/config" sudah ditambahkan di app.py — jangan duplikat di sini
+# prefix "/config" sudah ditambahkan di app.py â€” jangan duplikat di sini
 router = APIRouter(tags=["config"])
 
 
@@ -139,6 +139,25 @@ async def delete_camera_config(
     """Delete a camera from cameras.yaml."""
     await config_manager.delete_camera(camera_id)
     return ConfigResponse(data={"camera_id": camera_id})
+
+
+@router.post("/cameras/test-connection", response_model=RTSPTestResponse)
+async def test_rtsp_connection_adhoc(
+    request: RTSPTestRequest,
+    _user=Depends(get_current_admin_user),
+):
+    """Test RTSP URL ad-hoc (sebelum kamera disimpan)."""
+    try:
+        result = await _test_rtsp_connection(request.rtsp_url, request.timeout_s or 10)
+        return RTSPTestResponse(
+            success=result["success"],
+            message=result["message"],
+            codec=result.get("codec"),
+            resolution=result.get("resolution"),
+            fps=result.get("fps"),
+        )
+    except Exception as e:
+        return RTSPTestResponse(success=False, message=str(e))
 
 
 @router.post("/cameras/{camera_id}/test-rtsp", response_model=RTSPTestResponse)
@@ -411,3 +430,4 @@ async def _test_rtsp_connection(rtsp_url: str, timeout: int) -> dict[str, Any]:
         return {"success": False, "message": "FFprobe not found"}
     except Exception as e:
         return {"success": False, "message": str(e)}
+
