@@ -24,13 +24,37 @@ def build_record_command(rtsp_url: str, output_pattern: str) -> list[str]:
     ]
 
 
-def build_hls_command(rtsp_url: str, hls_dir: str, segment_duration: int = 2) -> list[str]:
-    """Bangun command FFmpeg untuk HLS live streaming ke browser."""
+def build_hls_command(
+    rtsp_url: str,
+    hls_dir: str,
+    segment_duration: int = 2,
+    force_transcode: bool = False,
+) -> list[str]:
+    """Bangun command FFmpeg untuk HLS live streaming ke browser.
+
+    Args:
+        rtsp_url: URL RTSP sumber kamera.
+        hls_dir: Direktori output HLS (index.m3u8 + seg*.ts).
+        segment_duration: Durasi tiap segment HLS dalam detik (default 2).
+        force_transcode: Paksa transcode ke H.264 agar kompatibel hls.js di browser.
+                         Set True otomatis jika codec kamera terdeteksi HEVC/H.265.
+                         False = stream copy (lebih efisien, tapi tidak jalan di browser
+                         jika kamera kirim HEVC).
+    """
+    if force_transcode:
+        # Transcode HEVC → H.264 agar bisa diputar hls.js di semua browser
+        # -preset ultrafast: prioritas kecepatan (perlu untuk real-time)
+        # -crf 23: kualitas seimbang (0=lossless, 51=worst)
+        video_codec_args = ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "23"]
+    else:
+        # Stream copy: tidak decode ulang, hemat CPU, hanya jalan jika codec H.264
+        video_codec_args = ["-c:v", "copy"]
+
     return [
         "ffmpeg", "-hide_banner", "-loglevel", "warning",
         "-rtsp_transport", "tcp",
         "-i", rtsp_url,
-        "-c:v", "copy",
+        *video_codec_args,
         "-c:a", "aac", "-b:a", "64k",
         "-f", "hls",
         "-hls_time", str(segment_duration),
@@ -39,6 +63,25 @@ def build_hls_command(rtsp_url: str, hls_dir: str, segment_duration: int = 2) ->
         "-hls_segment_filename", f"{hls_dir}/seg%03d.ts",
         f"{hls_dir}/index.m3u8",
     ]
+
+
+def detect_video_codec(rtsp_url: str) -> str | None:
+    """Probe codec video dari RTSP stream.
+
+    Returns:
+        Nama codec lowercase ('h264', 'hevc', 'h265', dll) atau None jika gagal.
+
+    Contoh penggunaan:
+        codec = detect_video_codec("rtsp://admin:pass@10.1.0.100/stream1")
+        force_transcode = codec in ("hevc", "h265")
+    """
+    info = probe_stream(rtsp_url)
+    if not info:
+        return None
+    for stream in info.get("streams", []):
+        if stream.get("codec_type") == "video":
+            return stream.get("codec_name")  # 'hevc', 'h264', 'h265', dll
+    return None
 
 
 def build_av1_encode_command(input_path: str, output_path: str, crf: int = 35) -> list[str]:
