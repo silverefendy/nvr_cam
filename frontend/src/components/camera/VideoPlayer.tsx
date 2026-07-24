@@ -1,4 +1,4 @@
-﻿import { useState, useRef, useCallback } from 'react'
+import { useState, useRef, useCallback } from 'react'
 import { useHLSPlayer } from '@/hooks/useHLSPlayer'
 import { camerasApi } from '@/api/cameras'
 import { useQuery } from '@tanstack/react-query'
@@ -46,7 +46,6 @@ export const VideoPlayer: React.FC<Props> = ({
     }
   }
 
-  // C-13: Browser Picture-in-Picture
   const handlePiP = useCallback(async (e: React.MouseEvent) => {
     e.stopPropagation()
     const video = videoRef.current
@@ -62,7 +61,6 @@ export const VideoPlayer: React.FC<Props> = ({
     }
   }, [])
 
-  // C-05: Fullscreen
   const handleFullscreen = useCallback((e: React.MouseEvent) => {
     e.stopPropagation()
     setFullscreen(cameraId)
@@ -73,18 +71,33 @@ export const VideoPlayer: React.FC<Props> = ({
     setStreamType(cameraId, streamType === 'main' ? 'sub' : 'main')
   }
 
+  // Shared container style — no border-radius, pure black bg, fill parent
+  const containerStyle: React.CSSProperties = {
+    position: 'relative',
+    width: '100%',
+    height: '100%',
+    background: '#000',
+    overflow: 'hidden',
+  }
+
   if (isLoading) {
     return (
-      <div className={`relative bg-gray-900 rounded overflow-hidden flex items-center justify-center ${className}`}>
-        <div className="text-gray-500 text-sm">Loading...</div>
+      <div className={className} style={containerStyle}>
+        <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <span style={{ color: '#6b7280', fontSize: 12 }}>Memuat...</span>
+        </div>
       </div>
     )
   }
 
   if (error || !data?.hls_url) {
     return (
-      <div className={`relative bg-gray-900 rounded overflow-hidden flex items-center justify-center ${className}`}>
-        <div className="text-red-400 text-sm">Camera offline</div>
+      <div className={className} style={containerStyle}>
+        <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+          <span style={{ fontSize: 24 }}>📷</span>
+          <span style={{ color: '#9ca3af', fontSize: 11 }}>{cameraName || cameraId}</span>
+          <span style={{ color: '#ef4444', fontSize: 10 }}>Offline</span>
+        </div>
       </div>
     )
   }
@@ -93,81 +106,74 @@ export const VideoPlayer: React.FC<Props> = ({
 
   return (
     <div
-      className={`relative bg-black rounded overflow-hidden group ${className}`}
+      className={`group ${className ?? ''}`}
+      style={containerStyle}
       onClick={onClick}
     >
       {showSnapshotView && snapshotUrl ? (
-        <div className="relative w-full h-full">
-          <img src={snapshotUrl} alt="Snapshot" className="w-full h-full object-cover" />
+        <div style={{ position: 'absolute', inset: 0 }}>
+          <img src={snapshotUrl} alt="Snapshot" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
           <button
             onClick={(e) => { e.stopPropagation(); setShowSnapshotView(false); setSnapshotUrl(null) }}
-            className="absolute top-2 right-2 px-2 py-1 bg-black/70 hover:bg-black/90 rounded text-xs text-white"
+            style={{ position: 'absolute', top: 6, right: 6, padding: '2px 6px', background: 'rgba(0,0,0,0.75)', color: '#fff', fontSize: 11, border: 'none', borderRadius: 4, cursor: 'pointer' }}
           >
-            âœ•
+            ✕
           </button>
         </div>
       ) : (
         <>
           <video
             ref={videoRef}
-            className="w-full h-full object-cover"
+            style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }}
             muted
             autoPlay
             playsInline
             onDoubleClick={handleFullscreen}
           />
 
-          {/* Bottom bar â€” selalu tampil */}
+          {/* Bottom bar — nama kamera + LIVE badge */}
           {showControls && (
-            <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent px-2 py-1.5 text-xs text-white flex justify-between items-center">
-              <span className="truncate max-w-[60%]">{cameraName || cameraId}</span>
-              <div className="flex items-center gap-1.5">
-                <span className="text-green-400 font-medium">LIVE</span>
-              </div>
+            <div style={{
+              position: 'absolute', bottom: 0, left: 0, right: 0,
+              background: 'linear-gradient(to top, rgba(0,0,0,0.75) 0%, transparent 100%)',
+              padding: '16px 8px 6px',
+              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+              pointerEvents: 'none',
+            }}>
+              <span style={{ color: '#e5e7eb', fontSize: 11, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '70%' }}>
+                {cameraName || cameraId}
+              </span>
+              <span style={{ color: '#4ade80', fontSize: 10, fontWeight: 700, letterSpacing: '0.05em' }}>● LIVE</span>
             </div>
           )}
 
-          {/* Hover overlay controls */}
+          {/* Top hover controls */}
           {showControls && (
-            <div className="absolute top-0 left-0 right-0 flex justify-between items-center px-1.5 py-1 bg-gradient-to-b from-black/60 to-transparent opacity-0 group-hover:opacity-100 transition-opacity">
+            <div
+              className="opacity-0 group-hover:opacity-100 transition-opacity"
+              style={{
+                position: 'absolute', top: 0, left: 0, right: 0,
+                background: 'linear-gradient(to bottom, rgba(0,0,0,0.65) 0%, transparent 100%)',
+                padding: '6px 6px 14px',
+                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                gap: 4,
+              }}
+            >
               {/* Stream toggle */}
               <button
                 onClick={toggleStream}
-                title={streamType === 'main' ? 'Switch to Sub stream' : 'Switch to Main stream'}
-                className="px-1.5 py-0.5 bg-black/60 hover:bg-blue-600 rounded text-[10px] text-white"
+                title={streamType === 'main' ? 'Switch to Sub' : 'Switch to Main'}
+                style={btnStyle}
               >
                 {streamType === 'main' ? 'MAIN' : 'SUB'}
               </button>
 
-              <div className="flex items-center gap-1">
-                {/* Snapshot */}
-                <button
-                  onClick={handleSnapshot}
-                  title="Capture snapshot"
-                  className="px-1.5 py-0.5 bg-black/60 hover:bg-gray-600 rounded text-[10px] text-white"
-                >
-                  ðŸ“·
-                </button>
-
-                {/* PiP â€” C-13 */}
+              <div style={{ display: 'flex', gap: 4 }}>
+                <button onClick={handleSnapshot} title="Snapshot" style={btnStyle}>📷</button>
                 {pipSupported && (
-                  <button
-                    onClick={handlePiP}
-                    title="Picture in Picture"
-                    className="px-1.5 py-0.5 bg-black/60 hover:bg-purple-600 rounded text-[10px] text-white"
-                  >
-                    â§‰
-                  </button>
+                  <button onClick={handlePiP} title="Picture in Picture" style={btnStyle}>⧉</button>
                 )}
-
-                {/* Fullscreen â€” C-05 */}
-                <button
-                  onClick={handleFullscreen}
-                  title="Fullscreen (or double-click video)"
-                  className="px-1.5 py-0.5 bg-black/60 hover:bg-gray-600 rounded text-[10px] text-white"
-                >
-                  â›¶
-                </button>
+                <button onClick={handleFullscreen} title="Fullscreen" style={btnStyle}>⛶</button>
               </div>
             </div>
           )}
@@ -177,3 +183,14 @@ export const VideoPlayer: React.FC<Props> = ({
   )
 }
 
+const btnStyle: React.CSSProperties = {
+  padding: '2px 7px',
+  background: 'rgba(0,0,0,0.55)',
+  color: '#fff',
+  fontSize: 10,
+  fontWeight: 600,
+  border: 'none',
+  borderRadius: 3,
+  cursor: 'pointer',
+  lineHeight: '18px',
+}
