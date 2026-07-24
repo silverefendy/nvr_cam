@@ -31,7 +31,9 @@ class Settings(BaseSettings):
 
     # Storage
     storage_threshold_pct: float = 10.0
-    hls_temp_dir: str = "/tmp/hls"
+    # Path ini harus cocok dengan volume hls_data di docker-compose.yml
+    # dan dengan yang di-serve Nginx: location /hls/ { alias /var/lib/nvr_cam/hls/; }
+    hls_temp_dir: str = "/var/lib/nvr_cam/hls"
     config_dir: str = "config"
 
     # App
