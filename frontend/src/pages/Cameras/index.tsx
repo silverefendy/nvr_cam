@@ -10,13 +10,11 @@ export default function CamerasPage() {
   const [editingCamera, setEditingCamera] = useState<Camera | null>(null)
   const queryClient = useQueryClient()
 
-  const { data: cameras, isLoading } = useQuery({ 
-    queryKey: ["cameras"], 
+  const { data: cameras, isLoading } = useQuery({
+    queryKey: ["cameras"],
     queryFn: async () => {
-      const response = await fetch('/api/v1/config/cameras')
-      if (!response.ok) throw new Error('Failed to fetch cameras')
-      const data = await response.json()
-      return data.data?.cameras || []
+      const res = await apiClient.get('/config/cameras')
+      return res.data?.data?.cameras || []
     }
   })
 
@@ -32,6 +30,9 @@ export default function CamerasPage() {
     mutationFn: async (id: string) => {
       const res = await apiClient.delete(`/config/cameras/${id}`)
       return res.data
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["cameras"] })
     },
   })
 
@@ -52,7 +53,7 @@ export default function CamerasPage() {
   }
 
   const handleDelete = (id: string) => {
-    if (confirm("Are you sure you want to delete this camera?")) {
+    if (confirm("Yakin ingin menghapus kamera ini?")) {
       deleteMutation.mutate(id)
     }
   }
@@ -114,6 +115,11 @@ export default function CamerasPage() {
       <div className="flex-1 overflow-auto bg-gray-900 rounded">
         {isLoading ? (
           <div className="flex items-center justify-center h-full text-gray-500">Loading...</div>
+        ) : !cameras?.length ? (
+          <div className="flex flex-col items-center justify-center h-full text-gray-500 gap-2">
+            <div className="text-4xl">📷</div>
+            <div className="text-sm">Belum ada kamera. Klik &quot;+ Add Camera&quot; untuk menambahkan.</div>
+          </div>
         ) : (
           <table className="w-full text-sm">
             <thead className="bg-gray-800 sticky top-0">
@@ -129,7 +135,7 @@ export default function CamerasPage() {
               </tr>
             </thead>
             <tbody>
-              {cameras?.map((camera: any) => (
+              {cameras.map((camera: any) => (
                 <tr key={camera.id} className="border-b border-gray-800 hover:bg-gray-800/50">
                   <td className="px-4 py-2 text-gray-300">{camera.id}</td>
                   <td className="px-4 py-2 text-white">{camera.name}</td>
@@ -148,7 +154,11 @@ export default function CamerasPage() {
                   <td className="px-4 py-2 text-gray-400">{camera.retention_days || 30} days</td>
                   <td className="px-4 py-2">
                     <button onClick={() => handleEdit(camera)} className="text-blue-400 hover:underline mr-2">Edit</button>
-                    <button onClick={() => handleDelete(camera.id)} className="text-red-400 hover:underline">Delete</button>
+                    <button
+                      onClick={() => handleDelete(camera.id)}
+                      disabled={deleteMutation.isPending}
+                      className="text-red-400 hover:underline disabled:opacity-40"
+                    >Delete</button>
                   </td>
                 </tr>
               ))}
