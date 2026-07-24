@@ -1,7 +1,7 @@
 # nvr_cam — Debug Session Summary
 **Repo:** https://github.com/silverefendy/nvr_cam  
 **Stack:** FastAPI + PostgreSQL + React (Vite) + Nginx + FFmpeg + Docker Compose  
-**Terakhir diupdate:** 2026-07-25 06:25 WIB
+**Terakhir diupdate:** 2026-07-25 06:40 WIB
 
 ---
 
@@ -10,14 +10,17 @@
 | Fitur | Status |
 |---|---|
 | Login | ✅ Berfungsi |
-| Tambah kamera (POST /config/cameras) | ✅ Berfungsi |
+| Tambah kamera (POST /config/cameras) | ✅ Berfungsi (error sekarang ditampilkan ke user) |
 | Hapus kamera (DELETE /config/cameras) | ✅ Berfungsi |
 | Edit kamera (PUT /config/cameras) | ✅ Berfungsi |
 | Test connection RTSP | ✅ Berfungsi |
 | Status Online/Offline di halaman Cameras | ✅ Berfungsi (auto-refresh 10s) |
 | Password tersimpan saat Edit | ✅ Berfungsi |
 | File HLS terbentuk di volume | ✅ Terbentuk di /var/lib/nvr_cam/hls/ |
-| **Live View menampilkan video** | ⏳ **Fix sudah di-push — perlu rebuild & test** |
+| Live View menampilkan video | ✅ Berfungsi (HEVC auto-transcode ke H.264) |
+| **Tombol grid 1x1/2x2/3x3/4x4** | ⏳ **Fix di-push — perlu rebuild frontend** |
+| **Tampilan Live View (dark, no border-radius)** | ⏳ **Fix di-push — perlu rebuild frontend** |
+| **Drag-drop kamera di grid** | ⏳ **Fix di-push — perlu rebuild frontend** |
 
 ---
 
@@ -91,51 +94,47 @@
 ### 12. HEVC (H.265) tidak didukung hls.js di browser
 - **File:** `backend/services/recorder/ffmpeg_wrapper.py`, `backend/services/recorder/camera_recorder.py`
 - **Commit:** `d37b6c3`, `7928196`
-- **Bug:** `build_hls_command()` pakai `-c:v copy` — stream copy langsung dari kamera tanpa transcode. Kamera yang output HEVC/H.265 (termasuk cam_07 di 10.1.0.151) menghasilkan file `.ts` dengan codec yang tidak bisa di-decode hls.js di browser (hls.js hanya support H.264 via MSE).
-- **Fix:**
-  - Tambah parameter `force_transcode: bool` di `build_hls_command()`. Jika True: pakai `-c:v libx264 -preset ultrafast -crf 23`.
-  - Tambah fungsi `detect_video_codec(rtsp_url)` untuk probe codec via `ffprobe`.
-  - Di `_run_hls_loop()`: probe codec sekali saat pertama start via `run_in_executor` (non-blocking). Auto-set `force_transcode=True` jika codec `hevc` atau `h265`.
-  - HLS FFmpeg stderr sekarang di-log (sebelumnya `DEVNULL`) untuk memudahkan debug.
+- **Bug:** `build_hls_command()` pakai `-c:v copy`. Kamera yang output HEVC menghasilkan `.ts` yang tidak bisa di-decode hls.js.
+- **Fix:** `detect_video_codec()` via ffprobe, auto `force_transcode=True` jika HEVC. HLS stderr sekarang di-log.
+
+### 13. Tombol grid 1x1/2x2/3x3/4x4 tidak sinkron dengan jumlah kamera
+- **File:** `frontend/src/store/cameras.ts`
+- **Commit:** `a9844bf`
+- **Bug:** `setGridSize()` hanya update state `gridSize`, tidak menyesuaikan `selectedCameras`. Grid columns berubah tapi jumlah VideoPlayer tidak berubah → 2x2 tampil 3 kamera, 4x4 tetap tampil 3 kamera.
+- **Fix:** `setGridSize()` sekarang auto-expand (tambah kamera yang belum tampil) atau auto-trim (`slice`) sesuai kapasitas grid. Ditambah konstanta `GRID_CAPACITY` untuk mapping `GridSize → max cameras`.
+
+### 14. Tampilan Live View jelek — sudut rounded, background putih
+- **File:** `frontend/src/pages/LiveView/index.tsx`, `frontend/src/components/camera/VideoPlayer.tsx`, `frontend/src/components/camera/CameraGrid.tsx`
+- **Commit:** `22603c7`, `f12ccf2`, `f72d60e`
+- **Bug:** Background `bg-slate-100` (abu terang), `VideoPlayer` pakai `rounded` class, video tidak fill container, gap antar kamera terlalu besar.
+- **Fix:** Full dark theme (`#0f1117`, `#1a1d27`). VideoPlayer tidak ada border-radius. Gap antar kamera 2px. Video `object-fit: contain`. CameraGrid pakai inline `style` (CSS grid) agar lebih presisi dari Tailwind.
+
+### 15. Drag-drop kamera di grid tidak ada
+- **File:** `frontend/src/components/camera/CameraGrid.tsx`, `frontend/src/store/cameras.ts`
+- **Commit:** `f72d60e`, `a9844bf`
+- **Implementasi:** HTML5 native drag-drop (`draggable`, `onDragStart`, `onDragOver`, `onDrop`). Drop highlight dengan outline biru. `reorderCameras(fromIndex, toIndex)` di store — swap posisi di `selectedCameras` array. Icon `⠿` muncul saat hover sebagai visual hint.
+
+### 16. Error tambah kamera tidak ditampilkan ke user
+- **File:** `frontend/src/components/camera/CameraForm.tsx`
+- **Commit:** `bf983b8`
+- **Bug:** `saveMutation.onError` tidak di-handle → kalau backend return error (misal duplikasi ID, storage drive kosong), form tutup diam-diam atau tidak ada feedback sama sekali.
+- **Fix:** Tambah `errorMsg` state + banner merah di atas form. Parse `err.response.data.detail` dari FastAPI. Tambah validasi client-side (nama wajib, IP wajib, storage wajib) sebelum kirim ke backend.
 
 ---
 
 ## Masalah yang Belum Selesai
 
-### ✅ Live View — semua fix sudah di-push, perlu verifikasi
-
-**Langkah verifikasi setelah rebuild:**
+Semua masalah yang dilaporkan sudah di-fix dan di-push. Perlu rebuild frontend:
 
 ```bash
-# 1. Rebuild backend (perubahan Python)
-git pull && docker compose up --build -d api
-
-# 2. Rebuild frontend (perubahan TypeScript hook)
-docker compose up --build -d frontend
-
-# 3. Cek log — pastikan deteksi codec muncul
-docker compose logs -f api | grep -E "Codec|HEVC|transcode|HLS"
-# Contoh output yang diharapkan:
-# [cam_07] Codec HEVC terdeteksi ('hevc') → aktifkan transcode H.264 untuk kompatibilitas browser
-# [cam_08] Codec: h264 → stream copy (tanpa transcode)
-
-# 4. Cek file HLS terbentuk
-docker exec cctv_api find /var/lib/nvr_cam/hls/ -name "*.m3u8" -type f
-
-# 5. Test akses via browser
-# Buka: http://<IP>:3000 → Live View → buka DevTools (F12) → Console
-# Tidak boleh ada error "[HLS] Fatal error"
+git pull && docker compose up --build -d frontend
 ```
 
-**Jika masih kosong setelah rebuild:**
-1. Buka DevTools → Network tab → filter `/hls/` → cek apakah `.m3u8` return 200 atau 404.
-2. Cek Console → ada error dari hls.js? Copy error lengkapnya.
-3. Jalankan: `docker compose logs -f api | grep -i "hls\|error\|codec"` → lihat apakah FFmpeg HLS process crash.
-4. Kemungkinan lain: `libx264` tidak ter-install di image Docker. Cek dengan: `docker exec cctv_api ffmpeg -encoders 2>&1 | grep libx264`
-
-**Jika libx264 tidak ada di container:**
-- Edit `Dockerfile.backend` → pastikan base image punya `ffmpeg` dengan libx264 support.
-- Contoh: `apt-get install -y ffmpeg` di Ubuntu sudah include libx264 secara default.
+Setelah rebuild, verifikasi:
+1. Tombol 1x1/2x2/3x3/4x4 → kamera tampil bertambah/berkurang sesuai grid
+2. Live View background hitam, tidak ada sudut rounded
+3. Coba drag kamera dari satu slot ke slot lain
+4. Coba tambah kamera dengan field kosong → harus muncul pesan error di form
 
 ---
 
@@ -180,9 +179,12 @@ volumes:
 | `backend/services/recorder/ffmpeg_wrapper.py` | Builder command FFmpeg (record, HLS, transcode, probe) |
 | `backend/services/recorder/manager.py` | Singleton RecordingManager |
 | `backend/db/repositories/base_repo.py` | Base CRUD DB |
+| `frontend/src/store/cameras.ts` | Zustand store kamera + grid state + drag-drop reorder |
 | `frontend/src/pages/Cameras/index.tsx` | Halaman manajemen kamera |
-| `frontend/src/pages/LiveView/index.tsx` | Halaman live view |
-| `frontend/src/components/camera/VideoPlayer.tsx` | Video player (hls.js) |
+| `frontend/src/pages/LiveView/index.tsx` | Halaman live view (dark theme) |
+| `frontend/src/components/camera/CameraGrid.tsx` | Grid layout + drag-drop handler |
+| `frontend/src/components/camera/VideoPlayer.tsx` | Video player (hls.js, no rounded corners) |
+| `frontend/src/components/camera/CameraForm.tsx` | Form tambah/edit kamera + error banner |
 | `frontend/src/hooks/useHLSPlayer.ts` | Hook HLS player (attach + error recovery) |
 | `scripts/nginx/cctv.conf` | Nginx config |
 | `backend/core/config.py` | Settings (hls_temp_dir, dll) |
