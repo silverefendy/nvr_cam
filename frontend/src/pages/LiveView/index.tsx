@@ -1,4 +1,4 @@
-﻿import { useQuery } from '@tanstack/react-query'
+import { useQuery } from '@tanstack/react-query'
 import { camerasApi } from '@/api/cameras'
 import { useCameraStore, GridSize } from '@/store/cameras'
 import { CameraGrid } from '@/components/camera/CameraGrid'
@@ -15,6 +15,7 @@ export default function LiveViewPage() {
   const { data: fetchedCameras } = useQuery({
     queryKey: ['cameras'],
     queryFn: camerasApi.list,
+    refetchInterval: 15000,
   })
 
   useEffect(() => {
@@ -29,35 +30,53 @@ export default function LiveViewPage() {
   )
 
   return (
-    <div className="flex flex-col h-full p-3 gap-3 bg-slate-100">
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: '#0f1117' }}>
+
       {/* Toolbar */}
-      <div className="flex items-center gap-3 bg-white border border-slate-200 rounded-xl px-4 py-2.5 flex-shrink-0 flex-wrap shadow-sm">
-        <span className="text-sm font-semibold text-slate-700">📹 Live View</span>
-        <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${online > 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0,
+        padding: '6px 12px',
+        background: '#1a1d27',
+        borderBottom: '1px solid #2a2d3a',
+        flexWrap: 'wrap',
+      }}>
+        <span style={{ color: '#94a3b8', fontSize: 12, fontWeight: 600, letterSpacing: '0.05em' }}>📹 LIVE VIEW</span>
+        <span style={{
+          fontSize: 11, padding: '1px 8px', borderRadius: 99, fontWeight: 600,
+          background: online > 0 ? 'rgba(74,222,128,0.15)' : 'rgba(100,116,139,0.15)',
+          color: online > 0 ? '#4ade80' : '#64748b',
+          border: `1px solid ${online > 0 ? 'rgba(74,222,128,0.3)' : 'rgba(100,116,139,0.2)'}`,
+        }}>
           {online}/{total} online
         </span>
 
         <button
           onClick={() => setShowFilter(f => !f)}
-          className={`ml-1 px-3 py-1.5 text-xs rounded-lg font-medium transition-colors ${
-            showFilter ? 'bg-sky-600 text-white' : 'bg-slate-100 hover:bg-slate-200 text-slate-600 border border-slate-300'
-          }`}
+          style={{
+            fontSize: 11, padding: '3px 10px', borderRadius: 6, fontWeight: 500, cursor: 'pointer',
+            background: showFilter ? '#2563eb' : '#1e2130',
+            color: showFilter ? '#fff' : '#94a3b8',
+            border: `1px solid ${showFilter ? '#2563eb' : '#2a2d3a'}`,
+          }}
         >
-          Filter Kamera ({selectedCameras.length})
+          Filter ({selectedCameras.length})
         </button>
 
-        <div className="flex-1" />
+        <div style={{ flex: 1 }} />
 
-        <div className="flex gap-1">
+        {/* Grid size buttons */}
+        <div style={{ display: 'flex', gap: 3 }}>
           {GRIDS.map(g => (
             <button
               key={g}
               onClick={() => setGridSize(g)}
-              className={`px-2.5 py-1.5 text-xs rounded-lg font-medium transition-colors ${
-                gridSize === g
-                  ? 'bg-sky-600 text-white shadow-sm'
-                  : 'bg-slate-100 hover:bg-slate-200 text-slate-600 border border-slate-300'
-              }`}
+              style={{
+                fontSize: 11, padding: '3px 10px', borderRadius: 6, fontWeight: 600, cursor: 'pointer',
+                background: gridSize === g ? '#2563eb' : '#1e2130',
+                color: gridSize === g ? '#fff' : '#64748b',
+                border: `1px solid ${gridSize === g ? '#2563eb' : '#2a2d3a'}`,
+                transition: 'all 0.15s',
+              }}
             >
               {g}
             </button>
@@ -67,46 +86,58 @@ export default function LiveViewPage() {
 
       {/* Filter panel */}
       {showFilter && (
-        <div className="bg-white border border-slate-200 rounded-xl px-4 py-3 flex-shrink-0 shadow-sm">
-          <div className="flex items-center gap-2 mb-3">
+        <div style={{
+          padding: '10px 12px', background: '#151822',
+          borderBottom: '1px solid #2a2d3a', flexShrink: 0,
+        }}>
+          <div style={{ display: 'flex', gap: 6, marginBottom: 8, alignItems: 'center' }}>
             <input
               type="text"
               placeholder="Cari kamera atau lokasi..."
               value={searchTerm}
               onChange={e => setSearchTerm(e.target.value)}
-              className="flex-1 bg-slate-50 text-slate-800 text-xs px-3 py-2 rounded-lg border border-slate-300 focus:outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-200"
+              style={{
+                flex: 1, background: '#1a1d27', color: '#e2e8f0', fontSize: 12,
+                padding: '5px 10px', border: '1px solid #2a2d3a', borderRadius: 6, outline: 'none',
+              }}
             />
-            <button onClick={selectAll} className="px-3 py-2 text-xs bg-slate-100 hover:bg-slate-200 text-slate-600 border border-slate-300 rounded-lg font-medium">
-              Pilih Semua
-            </button>
-            <button onClick={selectNone} className="px-3 py-2 text-xs bg-slate-100 hover:bg-slate-200 text-slate-600 border border-slate-300 rounded-lg font-medium">
-              Hapus Semua
-            </button>
+            <button onClick={selectAll} style={filterBtnStyle}>Pilih Semua</button>
+            <button onClick={selectNone} style={filterBtnStyle}>Hapus Semua</button>
           </div>
-          <div className="flex flex-wrap gap-1.5 max-h-28 overflow-y-auto">
-            {filteredCameras.map((c: Camera) => (
-              <button
-                key={c.id}
-                onClick={() => toggleSelected(c.id)}
-                className={`px-3 py-1.5 text-xs rounded-lg flex items-center gap-1.5 font-medium border transition-colors ${
-                  selectedCameras.includes(c.id)
-                    ? 'bg-sky-600 text-white border-sky-600'
-                    : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'
-                }`}
-              >
-                <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${c.status === 'online' ? 'bg-emerald-400' : 'bg-red-400'}`} />
-                {c.name}
-                {c.location ? <span className="opacity-60">({c.location})</span> : null}
-              </button>
-            ))}
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, maxHeight: 100, overflowY: 'auto' }}>
+            {filteredCameras.map((c: Camera) => {
+              const isSelected = selectedCameras.includes(c.id)
+              return (
+                <button
+                  key={c.id}
+                  onClick={() => toggleSelected(c.id)}
+                  style={{
+                    fontSize: 11, padding: '3px 10px', borderRadius: 5, cursor: 'pointer',
+                    fontWeight: 500, display: 'flex', alignItems: 'center', gap: 5,
+                    background: isSelected ? '#1d4ed8' : '#1a1d27',
+                    color: isSelected ? '#fff' : '#94a3b8',
+                    border: `1px solid ${isSelected ? '#2563eb' : '#2a2d3a'}`,
+                  }}
+                >
+                  <span style={{ width: 6, height: 6, borderRadius: '50%', background: c.status === 'online' ? '#4ade80' : '#ef4444', flexShrink: 0 }} />
+                  {c.name}
+                  {c.location && <span style={{ opacity: 0.55 }}>({c.location})</span>}
+                </button>
+              )
+            })}
           </div>
         </div>
       )}
 
-      {/* Grid */}
-      <div className="flex-1 overflow-hidden rounded-xl">
+      {/* Grid area — fill sisa ruang */}
+      <div style={{ flex: 1, overflow: 'hidden', minHeight: 0 }}>
         <CameraGrid />
       </div>
     </div>
   )
+}
+
+const filterBtnStyle: React.CSSProperties = {
+  fontSize: 11, padding: '4px 10px', borderRadius: 5, cursor: 'pointer',
+  background: '#1e2130', color: '#94a3b8', border: '1px solid #2a2d3a', fontWeight: 500,
 }
