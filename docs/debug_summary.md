@@ -1,7 +1,7 @@
 # nvr_cam — Debug Session Summary
 **Repo:** https://github.com/silverefendy/nvr_cam  
 **Stack:** FastAPI + PostgreSQL + React (Vite) + Nginx + FFmpeg + Docker Compose  
-**Terakhir diupdate:** 2026-07-25 06:20 WIB
+**Terakhir diupdate:** 2026-07-25 06:25 WIB
 
 ---
 
@@ -17,7 +17,7 @@
 | Status Online/Offline di halaman Cameras | ✅ Berfungsi (auto-refresh 10s) |
 | Password tersimpan saat Edit | ✅ Berfungsi |
 | File HLS terbentuk di volume | ✅ Terbentuk di /var/lib/nvr_cam/hls/ |
-| **Live View menampilkan video** | ❌ **Belum — video player kosong** |
+| **Live View menampilkan video** | ⏳ **Fix sudah di-push — perlu rebuild & test** |
 
 ---
 
@@ -82,28 +82,60 @@
 - **Bug:** Default `hls_temp_dir = "/tmp/hls"` tidak konsisten dengan volume Docker `/var/lib/nvr_cam/hls`.
 - **Fix:** Ganti default ke `/var/lib/nvr_cam/hls`.
 
+### 11. useHLSPlayer tidak re-attach jika videoRef masih null saat mount
+- **File:** `frontend/src/hooks/useHLSPlayer.ts`
+- **Commit:** `da2cd7c`
+- **Bug:** `useEffect` hanya bergantung pada `[hlsUrl]`. Jika `videoRef.current` masih `null` saat effect pertama jalan (race condition antara data query selesai dan DOM render), `hls.attachMedia()` tidak pernah dipanggil → video player kosong meski HLS URL sudah ada.
+- **Fix:** Tambahkan `videoRef.current` ke dependency array. Tambah HLS error recovery handler (`startLoad`, `recoverMediaError`) dan retry config (`fragLoadingMaxRetry: 6`).
+
+### 12. HEVC (H.265) tidak didukung hls.js di browser
+- **File:** `backend/services/recorder/ffmpeg_wrapper.py`, `backend/services/recorder/camera_recorder.py`
+- **Commit:** `d37b6c3`, `7928196`
+- **Bug:** `build_hls_command()` pakai `-c:v copy` — stream copy langsung dari kamera tanpa transcode. Kamera yang output HEVC/H.265 (termasuk cam_07 di 10.1.0.151) menghasilkan file `.ts` dengan codec yang tidak bisa di-decode hls.js di browser (hls.js hanya support H.264 via MSE).
+- **Fix:**
+  - Tambah parameter `force_transcode: bool` di `build_hls_command()`. Jika True: pakai `-c:v libx264 -preset ultrafast -crf 23`.
+  - Tambah fungsi `detect_video_codec(rtsp_url)` untuk probe codec via `ffprobe`.
+  - Di `_run_hls_loop()`: probe codec sekali saat pertama start via `run_in_executor` (non-blocking). Auto-set `force_transcode=True` jika codec `hevc` atau `h265`.
+  - HLS FFmpeg stderr sekarang di-log (sebelumnya `DEVNULL`) untuk memudahkan debug.
+
 ---
 
 ## Masalah yang Belum Selesai
 
-### Live View video kosong (PRIORITAS UTAMA)
+### ✅ Live View — semua fix sudah di-push, perlu verifikasi
 
-**Situasi:**
-- File HLS sudah ada dan aktif: `docker exec cctv_api find /var/lib/nvr_cam/hls/ -type f` → ada `.m3u8` dan `.ts` untuk cam_04 s/d cam_09
-- Nginx sudah dikonfigurasi benar: `location /hls/ { alias /var/lib/nvr_cam/hls/; }`
-- `GET /api/v1/stream/<id>/live?stream=sub` → return `{ hls_url: "/hls/<id>_sub/index.m3u8" }`
-- Frontend pakai `hls.js` untuk load URL tersebut
+**Langkah verifikasi setelah rebuild:**
 
-**Yang perlu diperiksa:**
-1. Buka browser DevTools → Network tab → cari request ke `/hls/cam_XX_sub/index.m3u8` → apakah 200 atau 404?
-2. Cek Console tab → apakah ada error dari hls.js?
-3. Kamera yang aktif di DB saat ini: cam_07, cam_08, cam_09. Pastikan Live View request ke camera ID yang benar.
-4. Dugaan terkuat: codec **HEVC (H.265)** tidak didukung `hls.js` di Firefox. Kamera 10.1.0.151 terdeteksi pakai HEVC. Perlu transcoding ke H.264 di FFmpeg (`-c:v libx264` bukan `-c:v copy`).
+```bash
+# 1. Rebuild backend (perubahan Python)
+git pull && docker compose up --build -d api
 
-**Langkah fix berikutnya jika penyebabnya HEVC:**
-- Edit `backend/services/recorder/ffmpeg_wrapper.py` → fungsi `build_hls_command()`
-- Ganti `-c:v copy` ke `-c:v libx264 -preset ultrafast -crf 23`
-- Rebuild api: `docker compose up --build -d api`
+# 2. Rebuild frontend (perubahan TypeScript hook)
+docker compose up --build -d frontend
+
+# 3. Cek log — pastikan deteksi codec muncul
+docker compose logs -f api | grep -E "Codec|HEVC|transcode|HLS"
+# Contoh output yang diharapkan:
+# [cam_07] Codec HEVC terdeteksi ('hevc') → aktifkan transcode H.264 untuk kompatibilitas browser
+# [cam_08] Codec: h264 → stream copy (tanpa transcode)
+
+# 4. Cek file HLS terbentuk
+docker exec cctv_api find /var/lib/nvr_cam/hls/ -name "*.m3u8" -type f
+
+# 5. Test akses via browser
+# Buka: http://<IP>:3000 → Live View → buka DevTools (F12) → Console
+# Tidak boleh ada error "[HLS] Fatal error"
+```
+
+**Jika masih kosong setelah rebuild:**
+1. Buka DevTools → Network tab → filter `/hls/` → cek apakah `.m3u8` return 200 atau 404.
+2. Cek Console → ada error dari hls.js? Copy error lengkapnya.
+3. Jalankan: `docker compose logs -f api | grep -i "hls\|error\|codec"` → lihat apakah FFmpeg HLS process crash.
+4. Kemungkinan lain: `libx264` tidak ter-install di image Docker. Cek dengan: `docker exec cctv_api ffmpeg -encoders 2>&1 | grep libx264`
+
+**Jika libx264 tidak ada di container:**
+- Edit `Dockerfile.backend` → pastikan base image punya `ffmpeg` dengan libx264 support.
+- Contoh: `apt-get install -y ffmpeg` di Ubuntu sudah include libx264 secara default.
 
 ---
 
@@ -118,6 +150,7 @@ Browser (React + hls.js)
                                                       ↑
                                               FFmpeg (via CameraRecorder)
                                               nulis HLS segments ke sini
+                                              (auto-transcode HEVC → H.264 jika perlu)
                                                       ↑
                                               RTSP stream dari kamera fisik
 ```
@@ -143,13 +176,14 @@ volumes:
 | `backend/api/routers/config.py` | CRUD kamera via PostgreSQL |
 | `backend/api/routers/cameras.py` | List kamera + status real-time |
 | `backend/api/routers/stream.py` | Return HLS URL |
-| `backend/services/recorder/camera_recorder.py` | FFmpeg recording + HLS |
+| `backend/services/recorder/camera_recorder.py` | FFmpeg recording + HLS + deteksi codec |
+| `backend/services/recorder/ffmpeg_wrapper.py` | Builder command FFmpeg (record, HLS, transcode, probe) |
 | `backend/services/recorder/manager.py` | Singleton RecordingManager |
 | `backend/db/repositories/base_repo.py` | Base CRUD DB |
 | `frontend/src/pages/Cameras/index.tsx` | Halaman manajemen kamera |
 | `frontend/src/pages/LiveView/index.tsx` | Halaman live view |
 | `frontend/src/components/camera/VideoPlayer.tsx` | Video player (hls.js) |
-| `frontend/src/hooks/useHLSPlayer.ts` | Hook HLS player |
+| `frontend/src/hooks/useHLSPlayer.ts` | Hook HLS player (attach + error recovery) |
 | `scripts/nginx/cctv.conf` | Nginx config |
 | `backend/core/config.py` | Settings (hls_temp_dir, dll) |
 
@@ -169,7 +203,7 @@ git pull && docker compose up --build -d frontend
 docker compose restart api
 
 # Lihat log real-time
-docker compose logs -f api | Select-String "cam_0|recording|Gagal|hls|error"
+docker compose logs -f api | Select-String "cam_0|recording|Gagal|hls|error|codec"
 ```
 
 ## Nama Service Docker (Penting!)
