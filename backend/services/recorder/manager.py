@@ -12,6 +12,28 @@ from .camera_recorder import CameraRecorder
 logger = get_logger(__name__, service="recorder")
 
 
+def _camera_to_dict(cam) -> dict:
+    """
+    Konversi objek Camera (SQLAlchemy model) ke dict untuk CameraRecorder.
+    segment_duration tidak ada sebagai kolom DB — diambil dari config_json
+    dengan default 3600 (1 jam per segment).
+    """
+    config_extra = cam.config_json or {}
+    return {
+        "id": cam.id,
+        "name": cam.name,
+        "location": cam.location,
+        "rtsp_main": cam.rtsp_main,
+        "rtsp_sub": cam.rtsp_sub,
+        "storage_drive": cam.storage_drive,
+        "motion_enabled": cam.motion_enabled,
+        "retention_days": cam.retention_days,
+        "segment_duration": config_extra.get("segment_duration", 3600),
+        "is_active": cam.is_active,
+        "config_json": cam.config_json,
+    }
+
+
 class RecordingManager:
     """Singleton — satu instance untuk semua kamera."""
     _instance: "RecordingManager | None" = None
@@ -32,32 +54,15 @@ class RecordingManager:
         async with AsyncSessionLocal() as db:
             repo = CameraRepository(db)
             cameras = await repo.get_active_cameras()
-            
-            camera_dicts = []
-            for cam in cameras:
-                camera_dicts.append({
-                    "id": cam.id,
-                    "name": cam.name,
-                    "location": cam.location,
-                    "rtsp_main": cam.rtsp_main,
-                    "rtsp_sub": cam.rtsp_sub,
-                    "storage_drive": cam.storage_drive,
-                    "motion_enabled": cam.motion_enabled,
-                    "retention_days": cam.retention_days,
-                    "segment_duration": cam.segment_duration,
-                    "is_active": cam.is_active,
-                    "config_json": cam.config_json,
-                })
-            
-            return camera_dicts
+            return [_camera_to_dict(cam) for cam in cameras]
 
     async def start_all(self, cameras: list[dict] = None):
         """Start recording semua kamera secara concurrent."""
         self._running = True
-        
+
         if cameras is None:
             cameras = await self.load_cameras_from_db()
-        
+
         logger.info(f"Memulai recording untuk {len(cameras)} kamera")
         tasks = []
         for cam in cameras:
@@ -74,33 +79,24 @@ class RecordingManager:
         self.recorders.clear()
 
     async def restart_camera(self, camera_id: str):
-        """Restart recording for a single camera."""
+        """Restart recording for a single camera (load fresh config from DB)."""
+        # Stop recorder lama jika ada
         if camera_id in self.recorders:
             await self.recorders[camera_id].stop()
             del self.recorders[camera_id]
-        
-        # Reload camera config from DB
+
+        # Load config terbaru dari DB
         async with AsyncSessionLocal() as db:
             repo = CameraRepository(db)
             cam = await repo.get_by_id(camera_id)
             if cam and cam.is_active:
-                camera_dict = {
-                    "id": cam.id,
-                    "name": cam.name,
-                    "location": cam.location,
-                    "rtsp_main": cam.rtsp_main,
-                    "rtsp_sub": cam.rtsp_sub,
-                    "storage_drive": cam.storage_drive,
-                    "motion_enabled": cam.motion_enabled,
-                    "retention_days": cam.retention_days,
-                    "segment_duration": cam.segment_duration,
-                    "is_active": cam.is_active,
-                    "config_json": cam.config_json,
-                }
+                camera_dict = _camera_to_dict(cam)
                 recorder = CameraRecorder(camera_dict)
                 self.recorders[camera_id] = recorder
                 asyncio.create_task(recorder.start())
                 logger.info(f"Restarted recording for camera {camera_id}")
+            else:
+                logger.warning(f"Camera {camera_id} not found or inactive — recorder not started")
 
     def get_status(self, camera_id: str = None) -> dict | bool:
         """Return status for specific camera or all cameras."""
