@@ -1,7 +1,7 @@
-"""Repository untuk operasi database terkait Recording."""
+﻿"""Repository untuk operasi database terkait Recording."""
 from datetime import datetime
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_, func, delete
+from sqlalchemy import select, and_, func, delete, desc
 from backend.db.models.recording import Recording
 from .base_repo import BaseRepository
 
@@ -9,6 +9,35 @@ from .base_repo import BaseRepository
 class RecordingRepository(BaseRepository[Recording]):
     def __init__(self, db: AsyncSession):
         super().__init__(Recording, db)
+
+    async def get_recent(self, limit: int = 500) -> list[Recording]:
+        """Ambil rekaman terbaru tanpa filter, diurutkan dari yang terbaru."""
+        result = await self.db.execute(
+            select(Recording).order_by(desc(Recording.started_at)).limit(limit)
+        )
+        return result.scalars().all()
+
+    async def get_by_camera(self, camera_id: str, limit: int = 200) -> list[Recording]:
+        """Ambil rekaman untuk satu kamera, terbaru dulu."""
+        result = await self.db.execute(
+            select(Recording)
+            .where(Recording.camera_id == camera_id)
+            .order_by(desc(Recording.started_at))
+            .limit(limit)
+        )
+        return result.scalars().all()
+
+    async def get_by_date_range(self, date_from: datetime, date_to: datetime) -> list[Recording]:
+        """Ambil semua rekaman dalam rentang tanggal."""
+        result = await self.db.execute(
+            select(Recording).where(
+                and_(
+                    Recording.started_at >= date_from,
+                    Recording.started_at <= date_to,
+                )
+            ).order_by(desc(Recording.started_at))
+        )
+        return result.scalars().all()
 
     async def get_by_camera_and_date(
         self, camera_id: str, date_from: datetime, date_to: datetime
@@ -42,7 +71,6 @@ class RecordingRepository(BaseRepository[Recording]):
         return result.scalar() or 0.0
 
     async def get_not_encoded_av1(self, limit: int = 5) -> list[Recording]:
-        """Ambil rekaman yang belum di-encode ke AV1 — untuk idle encoder."""
         result = await self.db.execute(
             select(Recording).where(
                 and_(
@@ -54,7 +82,6 @@ class RecordingRepository(BaseRepository[Recording]):
         return result.scalars().all()
 
     async def delete_old(self, camera_id: str, before_date: datetime) -> int:
-        """Delete recordings older than specified date."""
         result = await self.db.execute(
             delete(Recording).where(
                 and_(

@@ -1,5 +1,6 @@
-import { useState, useEffect } from "react"
+﻿import { useState, useEffect } from "react"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
+import { apiClient } from "@/api/client"
 import { storageApi } from "@/api/storage"
 import { recordingsApi } from "@/api/recordings"
 import { camerasApi } from "@/api/cameras"
@@ -22,8 +23,8 @@ const formatDate = (iso: string) => {
   return d.toLocaleString('id-ID', { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' })
 }
 const todayStr = () => new Date().toISOString().slice(0, 10)
-const weekAgoStr = () => {
-  const d = new Date(); d.setDate(d.getDate() - 7); return d.toISOString().slice(0, 10)
+const monthAgoStr = () => {
+  const d = new Date(); d.setDate(d.getDate() - 30); return d.toISOString().slice(0, 10)
 }
 
 export default function StoragePage() {
@@ -33,7 +34,7 @@ export default function StoragePage() {
   const [schedEnabled, setSchedEnabled] = useState(false)
   const [message, setMessage]           = useState<{ type: "success" | "error"; text: string } | null>(null)
   const [recCameraId, setRecCameraId]   = useState<string>("")
-  const [recDateFrom, setRecDateFrom]   = useState(weekAgoStr())
+  const [recDateFrom, setRecDateFrom]   = useState(monthAgoStr())
   const [recDateTo, setRecDateTo]       = useState(todayStr())
   const [playingId, setPlayingId]       = useState<number | null>(null)
 
@@ -107,6 +108,15 @@ export default function StoragePage() {
   const deleteMutation = useMutation({
     mutationFn: (id: number) => recordingsApi.delete(id),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["recordings"] }),
+  })
+
+  const syncMutation = useMutation({
+    mutationFn: () => apiClient.post('/recordings/sync').then(r => r.data),
+    onSuccess: (data: any) => {
+      queryClient.invalidateQueries({ queryKey: ["recordings"] })
+      showMsg("success", `Sync selesai: ${data.inserted} file baru ditambahkan, ${data.skipped} sudah ada`)
+    },
+    onError: () => showMsg("error", "Sync gagal"),
   })
 
   const getUsageColor = (p: number) => p < 10 ? '#ef4444' : p < 25 ? '#f59e0b' : '#10b981'
@@ -548,3 +558,5 @@ const smallBtn: React.CSSProperties = {
   padding: '3px 8px', borderRadius: 5, fontSize: 11, fontWeight: 600,
   border: 'none', cursor: 'pointer', whiteSpace: 'nowrap',
 }
+
+
