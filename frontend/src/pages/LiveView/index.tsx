@@ -1,21 +1,36 @@
 import { useQuery } from '@tanstack/react-query'
 import { camerasApi } from '@/api/cameras'
-import { useCameraStore, GridSize } from '@/store/cameras'
+import { useCameraStore } from '@/store/cameras'
 import { CameraGrid } from '@/components/camera/CameraGrid'
 import { FloatingCameraLayout } from '@/components/camera/FloatingCameraLayout'
 import { useEffect, useState } from 'react'
 import type { Camera } from '@/types'
 
-const GRIDS: GridSize[] = ['1x1', '2x2', '3x3', '4x4', '5x6']
+const PRESET_GRIDS: { label: string; rows: number; cols: number }[] = [
+  { label: '1x1', rows: 1, cols: 1 },
+  { label: '2x2', rows: 2, cols: 2 },
+  { label: '3x3', rows: 3, cols: 3 },
+  { label: '3x4', rows: 3, cols: 4 },
+  { label: '4x4', rows: 4, cols: 4 },
+  { label: '4x5', rows: 4, cols: 5 },
+  { label: '5x6', rows: 5, cols: 6 },
+]
 
-// Mode tampilan Live View
 type ViewMode = 'grid' | 'floating'
 
 export default function LiveViewPage() {
-  const { cameras, gridSize, setGridSize, setCameras, selectedCameras, toggleSelected, selectAll, selectNone } = useCameraStore()
+  const {
+    cameras, gridRows, gridCols,
+    setGridDimensions, setCameras,
+    selectedCameras, toggleSelected, selectAll, selectNone
+  } = useCameraStore()
+
   const [showFilter, setShowFilter] = useState(false)
   const [searchTerm, setSearchTerm] = useState('')
   const [viewMode, setViewMode] = useState<ViewMode>('grid')
+  const [showCustomInput, setShowCustomInput] = useState(false)
+  const [customRows, setCustomRows] = useState(gridRows)
+  const [customCols, setCustomCols] = useState(gridCols)
 
   const { data: fetchedCameras } = useQuery({
     queryKey: ['cameras'],
@@ -34,11 +49,16 @@ export default function LiveViewPage() {
     (c.location ?? '').toLowerCase().includes(searchTerm.toLowerCase())
   )
 
+  const applyCustomGrid = () => {
+    const r = Math.max(1, Math.min(10, customRows))
+    const c = Math.max(1, Math.min(10, customCols))
+    setGridDimensions(r, c)
+    setShowCustomInput(false)
+  }
+
   return (
-    // Tinggi penuh layar, tidak ada scroll — semua konten harus muat
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: '#0f1117' }}>
 
-      {/* ── Toolbar ───────────────────────────────────────────────────── */}
       <div style={{
         display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0,
         padding: '5px 10px',
@@ -47,8 +67,7 @@ export default function LiveViewPage() {
         flexWrap: 'wrap',
       }}>
 
-        {/* Label + status badge */}
-        <span style={{ color: '#94a3b8', fontSize: 11, fontWeight: 700, letterSpacing: '0.07em' }}>📹 LIVE</span>
+        <span style={{ color: '#94a3b8', fontSize: 11, fontWeight: 700, letterSpacing: '0.07em' }}>LIVE</span>
         <span style={{
           fontSize: 10, padding: '1px 7px', borderRadius: 99, fontWeight: 600,
           background: online > 0 ? 'rgba(74,222,128,0.12)' : 'rgba(100,116,139,0.12)',
@@ -58,7 +77,6 @@ export default function LiveViewPage() {
           {online}/{total} online
         </span>
 
-        {/* Filter toggle */}
         <button
           onClick={() => setShowFilter(f => !f)}
           style={{
@@ -73,71 +91,124 @@ export default function LiveViewPage() {
 
         <div style={{ flex: 1 }} />
 
-        {/* ── Mode toggle: Grid / Floating ─────────── */}
         <div style={{
-          display: 'flex', gap: 2,
-          background: '#12151f',
-          border: '1px solid #2a2d3a',
-          borderRadius: 6,
-          padding: 2,
+          display: 'flex', gap: 2, background: '#12151f',
+          border: '1px solid #2a2d3a', borderRadius: 6, padding: 2,
         }}>
           <button
             onClick={() => setViewMode('grid')}
-            title="Grid Mode — kamera mengisi layar secara merata"
             style={{
               fontSize: 10, padding: '3px 9px', borderRadius: 4, fontWeight: 600, cursor: 'pointer',
               background: viewMode === 'grid' ? '#2563eb' : 'transparent',
               color: viewMode === 'grid' ? '#fff' : '#64748b',
-              border: 'none',
-              transition: 'all 0.15s',
+              border: 'none', transition: 'all 0.15s',
             }}
-          >
-            ⊞ Grid
-          </button>
+          >Grid</button>
           <button
             onClick={() => setViewMode('floating')}
-            title="Floating Mode — setiap kamera bisa dipindah dan di-resize"
             style={{
               fontSize: 10, padding: '3px 9px', borderRadius: 4, fontWeight: 600, cursor: 'pointer',
               background: viewMode === 'floating' ? '#7c3aed' : 'transparent',
               color: viewMode === 'floating' ? '#fff' : '#64748b',
-              border: 'none',
-              transition: 'all 0.15s',
+              border: 'none', transition: 'all 0.15s',
             }}
-          >
-            ⧉ Floating
-          </button>
+          >Floating</button>
         </div>
 
-        {/* ── Grid size buttons (hanya tampil di mode Grid) ─── */}
         {viewMode === 'grid' && (
-          <div style={{ display: 'flex', gap: 2 }}>
-            {GRIDS.map(g => (
-              <button
-                key={g}
-                onClick={() => setGridSize(g)}
-                style={{
-                  fontSize: 10, padding: '3px 8px', borderRadius: 5, fontWeight: 700, cursor: 'pointer',
-                  background: gridSize === g ? '#2563eb' : '#1e2130',
-                  color: gridSize === g ? '#fff' : '#64748b',
-                  border: `1px solid ${gridSize === g ? '#2563eb' : '#2a2d3a'}`,
-                  transition: 'all 0.15s',
-                }}
-              >
-                {g}
-              </button>
-            ))}
+          <div style={{ display: 'flex', gap: 2, alignItems: 'center', position: 'relative' }}>
+            {PRESET_GRIDS.map(g => {
+              const isActive = gridRows === g.rows && gridCols === g.cols && !showCustomInput
+              return (
+                <button
+                  key={g.label}
+                  onClick={() => {
+                    setGridDimensions(g.rows, g.cols)
+                    setShowCustomInput(false)
+                  }}
+                  style={{
+                    fontSize: 10, padding: '3px 8px', borderRadius: 5, fontWeight: 700, cursor: 'pointer',
+                    background: isActive ? '#2563eb' : '#1e2130',
+                    color: isActive ? '#fff' : '#64748b',
+                    border: `1px solid ${isActive ? '#2563eb' : '#2a2d3a'}`,
+                    transition: 'all 0.15s',
+                  }}
+                >{g.label}</button>
+              )
+            })}
+
+            <button
+              onClick={() => {
+                setCustomRows(gridRows)
+                setCustomCols(gridCols)
+                setShowCustomInput(v => !v)
+              }}
+              style={{
+                fontSize: 10, padding: '3px 8px', borderRadius: 5, fontWeight: 700, cursor: 'pointer',
+                background: showCustomInput ? '#7c3aed' : '#1e2130',
+                color: showCustomInput ? '#fff' : '#64748b',
+                border: `1px solid ${showCustomInput ? '#7c3aed' : '#2a2d3a'}`,
+                transition: 'all 0.15s',
+              }}
+            >Custom</button>
+
+            {showCustomInput && (
+              <div style={{
+                position: 'absolute', top: '100%', right: 0, marginTop: 6,
+                background: '#1a1d27', border: '1px solid #2a2d3a', borderRadius: 8,
+                padding: '12px 14px', zIndex: 100, boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
+                display: 'flex', flexDirection: 'column', gap: 10, minWidth: 180,
+              }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: '#94a3b8' }}>
+                  Ukuran Grid Manual
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                    <label style={{ fontSize: 9, color: '#64748b', fontWeight: 600 }}>BARIS</label>
+                    <input
+                      type="number" min={1} max={10} value={customRows}
+                      onChange={e => setCustomRows(Number(e.target.value))}
+                      style={{
+                        width: 52, padding: '5px', borderRadius: 6, textAlign: 'center',
+                        background: '#12151f', color: '#e2e8f0', fontSize: 14, fontWeight: 700,
+                        border: '1px solid #2a2d3a', outline: 'none',
+                      }}
+                    />
+                  </div>
+                  <span style={{ color: '#475569', fontSize: 18, fontWeight: 800, marginTop: 14 }}>x</span>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                    <label style={{ fontSize: 9, color: '#64748b', fontWeight: 600 }}>KOLOM</label>
+                    <input
+                      type="number" min={1} max={10} value={customCols}
+                      onChange={e => setCustomCols(Number(e.target.value))}
+                      style={{
+                        width: 52, padding: '5px', borderRadius: 6, textAlign: 'center',
+                        background: '#12151f', color: '#e2e8f0', fontSize: 14, fontWeight: 700,
+                        border: '1px solid #2a2d3a', outline: 'none',
+                      }}
+                    />
+                  </div>
+                </div>
+                <div style={{ fontSize: 10, color: '#475569' }}>
+                  = {customRows * customCols} slot kamera
+                </div>
+                <button
+                  onClick={applyCustomGrid}
+                  style={{
+                    padding: '7px', borderRadius: 6, fontSize: 11, fontWeight: 700,
+                    background: '#2563eb', color: '#fff', border: 'none', cursor: 'pointer',
+                  }}
+                >Terapkan {customRows}x{customCols}</button>
+              </div>
+            )}
           </div>
         )}
       </div>
 
-      {/* ── Filter panel ──────────────────────────────────────────────── */}
       {showFilter && (
         <div style={{
-          padding: '8px 10px',
-          background: '#151822',
-          borderBottom: '1px solid #2a2d3a',
-          flexShrink: 0,
+          padding: '8px 10px', background: '#151822',
+          borderBottom: '1px solid #2a2d3a', flexShrink: 0,
         }}>
           <div style={{ display: 'flex', gap: 5, marginBottom: 6, alignItems: 'center' }}>
             <input
@@ -181,20 +252,15 @@ export default function LiveViewPage() {
         </div>
       )}
 
-      {/* ── Area konten utama ─────────────────────────────────────────── */}
-      {/*
-        flex: 1 + min-height: 0 adalah kunci agar area ini mengisi sisa tinggi
-        tanpa menyebabkan overflow. Tanpa min-height: 0, flex item bisa overflow
-        melebihi parent di beberapa browser.
-      */}
-      <div style={{ flex: 1, minHeight: 0, position: 'relative' }}>
+      <div
+        style={{ flex: 1, minHeight: 0, position: 'relative' }}
+        onClick={() => showCustomInput && setShowCustomInput(false)}
+      >
         {viewMode === 'grid' ? (
-          // Grid mode: kamera mengisi area secara merata
           <div style={{ width: '100%', height: '100%' }}>
             <CameraGrid />
           </div>
         ) : (
-          // Floating mode: kamera sebagai window yang bisa dipindah dan di-resize
           <FloatingCameraLayout />
         )}
       </div>

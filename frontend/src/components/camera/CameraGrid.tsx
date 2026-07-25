@@ -1,19 +1,16 @@
 import React, { useRef, useState } from 'react'
-import { useCameraStore, GridSize } from '@/store/cameras'
+import { useCameraStore } from '@/store/cameras'
 import { VideoPlayer } from './VideoPlayer'
 import { FullscreenPlayer } from './FullscreenPlayer'
-
-const COLS: Record<GridSize, number> = {
-  '1x1': 1,
-  '2x2': 2,
-  '3x3': 3,
-  '4x4': 4,
-  '5x6': 5,
-}
+import { useNavigate } from 'react-router-dom'
 
 export const CameraGrid: React.FC = () => {
-  const { cameras, selectedCameras, gridSize, fullscreenCameraId, setFullscreen, reorderCameras } = useCameraStore()
+  const {
+    cameras, selectedCameras, gridRows, gridCols,
+    fullscreenCameraId, setFullscreen, reorderCameras
+  } = useCameraStore()
   const nameMap = Object.fromEntries(cameras.map(c => [c.id, c.name]))
+  const navigate = useNavigate()
 
   const dragIndexRef = useRef<number | null>(null)
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null)
@@ -35,9 +32,7 @@ export const CameraGrid: React.FC = () => {
     setDragOverIndex(null)
   }
 
-  const cols = COLS[gridSize]
-  const rows = Math.max(1, Math.ceil(selectedCameras.length / cols))
-  const totalSlots = rows * cols
+  const totalSlots = gridRows * gridCols
 
   return (
     <>
@@ -49,24 +44,13 @@ export const CameraGrid: React.FC = () => {
         />
       )}
 
-      {/*
-        KUNCI ADAPTIVE GRID:
-        - position: absolute + inset: 0  →  grid mengisi TEPAT area parent,
-          tanpa tergantung pada height: 100% chain yang sering bermasalah.
-        - gridTemplateRows: repeat(N, 1fr)  →  setiap baris dapat tinggi merata.
-        - overflow: hidden  →  pastikan video tidak bisa "membesar" keluar.
-
-        Kenapa position:absolute lebih andal dari height:100%?
-        Karena absolute mengacu ke nearest positioned ancestor (position:relative
-        di parent), bukan ke computed height — lebih prediktif di semua browser.
-      */}
       <div
         style={{
           position: 'absolute',
           inset: 0,
           display: 'grid',
-          gridTemplateColumns: `repeat(${cols}, 1fr)`,
-          gridTemplateRows: `repeat(${rows}, 1fr)`,
+          gridTemplateColumns: `repeat(${gridCols}, 1fr)`,
+          gridTemplateRows: `repeat(${gridRows}, 1fr)`,
           gap: '2px',
           background: '#000',
           overflow: 'hidden',
@@ -111,7 +95,40 @@ export const CameraGrid: React.FC = () => {
         ))}
 
         {Array.from({ length: Math.max(0, totalSlots - selectedCameras.length) }).map((_, i) => (
-          <div key={`empty-${i}`} style={{ background: '#0a0a0a', minHeight: 0, minWidth: 0 }} />
+          <div
+            key={`empty-${i}`}
+            onClick={() => navigate('/cameras')}
+            title="Klik untuk tambah kamera"
+            style={{
+              background: '#0d1117',
+              minHeight: 0, minWidth: 0,
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 8,
+              cursor: 'pointer',
+              border: '1px dashed #1e2a3a',
+              transition: 'background 0.15s, border-color 0.15s',
+            }}
+            onMouseEnter={e => {
+              (e.currentTarget as HTMLDivElement).style.background = '#111827'
+              ;(e.currentTarget as HTMLDivElement).style.borderColor = '#2563eb'
+            }}
+            onMouseLeave={e => {
+              (e.currentTarget as HTMLDivElement).style.background = '#0d1117'
+              ;(e.currentTarget as HTMLDivElement).style.borderColor = '#1e2a3a'
+            }}
+          >
+            <div style={{
+              width: 36, height: 36, borderRadius: '50%',
+              background: 'rgba(37,99,235,0.15)',
+              border: '1px solid rgba(37,99,235,0.3)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: 20, color: '#2563eb',
+            }}>+</div>
+            <span style={{ fontSize: 10, color: '#334155', fontWeight: 500 }}>Tambah Kamera</span>
+          </div>
         ))}
       </div>
 
