@@ -17,10 +17,10 @@ class CameraConfigCreate(BaseModel):
     id: str | None = None  # Auto-generate if empty
     name: str = Field(..., min_length=1, max_length=100)
     location: str | None = Field(None, max_length=100)
-    ip_address: str = Field(..., description="Camera IP address")
+    ip_address: str | None = Field(None, description="Camera IP address — tidak wajib jika pakai custom RTSP")
     port: int = Field(554, ge=1, le=65535)
     username: str = Field("admin", max_length=50)
-    password: str = Field(..., min_length=1, max_length=100)
+    password: str = Field("", max_length=100)  # Tidak wajib jika pakai custom RTSP
     channel: int = Field(1, ge=1, le=16)
     rtsp_main_custom: str | None = Field(None, description="Custom RTSP URL override")
     rtsp_sub_custom: str | None = Field(None, description="Custom substream RTSP URL")
@@ -28,7 +28,7 @@ class CameraConfigCreate(BaseModel):
     motion_enabled: bool = False
     retention_days: int = Field(30, ge=1, le=365)
     motion_zones: list[MotionZoneConfig] | None = None
-    
+
     @field_validator("id")
     @classmethod
     def validate_id(cls, v: str | None) -> str | None:
@@ -44,7 +44,7 @@ class CameraConfigUpdate(BaseModel):
     ip_address: str | None = None
     port: int | None = Field(None, ge=1, le=65535)
     username: str | None = Field(None, max_length=50)
-    password: str | None = Field(None, min_length=1, max_length=100)
+    password: str | None = Field(None, max_length=100)
     channel: int | None = Field(None, ge=1, le=16)
     rtsp_main_custom: str | None = None
     rtsp_sub_custom: str | None = None

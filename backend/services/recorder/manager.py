@@ -95,6 +95,9 @@ class RecordingManager:
         concurrent untuk kamera yang sama. Jika ada restart yang sedang
         berjalan, yang baru akan menunggu sampai selesai — sehingga
         konfigurasi terbaru yang selalu dipakai.
+
+        Juga update storage_manager.camera_drive_map agar kamera baru
+        langsung terdaftar untuk monitoring storage dan statistik.
         """
         lock = self._get_restart_lock(camera_id)
         async with lock:
@@ -117,6 +120,19 @@ class RecordingManager:
                     self.recorders[camera_id] = recorder
                     asyncio.create_task(recorder.start())
                     logger.info(f"Restarted recording for camera {camera_id}")
+
+                    # Update storage_manager.camera_drive_map agar kamera baru
+                    # terdaftar untuk monitoring storage dan cleanup otomatis.
+                    # Import di dalam fungsi untuk hindari circular import.
+                    try:
+                        from backend.api.app import app
+                        storage_manager = getattr(app.state, "storage_manager", None)
+                        if storage_manager is not None:
+                            storage_manager.camera_drive_map[camera_id] = cam.storage_drive
+                            logger.info(f"[{camera_id}] Terdaftar di storage_manager: {cam.storage_drive}")
+                    except Exception as e:
+                        logger.warning(f"[{camera_id}] Gagal update storage_manager: {e}")
+
                 else:
                     logger.warning(f"Camera {camera_id} not found or inactive — recorder not started")
 
