@@ -71,7 +71,6 @@ export const VideoPlayer: React.FC<Props> = ({
     setStreamType(cameraId, streamType === 'main' ? 'sub' : 'main')
   }
 
-  // Shared container style — no border-radius, pure black bg, fill parent
   const containerStyle: React.CSSProperties = {
     position: 'relative',
     width: '100%',
@@ -122,28 +121,36 @@ export const VideoPlayer: React.FC<Props> = ({
         </div>
       ) : (
         <>
+          {/*
+            objectFit: 'cover' — video mengisi penuh kotak tanpa letterbox hitam.
+            Sisi yang lebih panjang akan terpotong sedikit, tapi seluruh kotak terisi video.
+            Ganti ke 'contain' kalau mau melihat full frame tanpa crop.
+          */}
           <video
             ref={videoRef}
-            style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }}
+            style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
             muted
             autoPlay
             playsInline
             onDoubleClick={handleFullscreen}
           />
 
-          {/* Bottom bar — nama kamera + LIVE badge */}
+          {/* Bottom bar */}
           {showControls && (
             <div style={{
               position: 'absolute', bottom: 0, left: 0, right: 0,
-              background: 'linear-gradient(to top, rgba(0,0,0,0.75) 0%, transparent 100%)',
-              padding: '16px 8px 6px',
-              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+              background: 'linear-gradient(to top, rgba(0,0,0,0.8) 0%, transparent 100%)',
+              padding: '20px 8px 6px',
+              display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end',
               pointerEvents: 'none',
             }}>
-              <span style={{ color: '#e5e7eb', fontSize: 11, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '70%' }}>
-                {cameraName || cameraId}
-              </span>
-              <span style={{ color: '#4ade80', fontSize: 10, fontWeight: 700, letterSpacing: '0.05em' }}>● LIVE</span>
+              <div>
+                <div style={{ color: '#e2e8f0', fontSize: 12, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 180, textShadow: '0 1px 3px rgba(0,0,0,0.8)' }}>
+                  {cameraName || cameraId}
+                </div>
+                <div style={{ color: '#94a3b8', fontSize: 9, marginTop: 1 }}>{cameraId}</div>
+              </div>
+              <span style={{ color: '#4ade80', fontSize: 10, fontWeight: 700, letterSpacing: '0.05em', textShadow: '0 1px 3px rgba(0,0,0,0.8)' }}>● LIVE</span>
             </div>
           )}
 
@@ -153,26 +160,18 @@ export const VideoPlayer: React.FC<Props> = ({
               className="opacity-0 group-hover:opacity-100 transition-opacity"
               style={{
                 position: 'absolute', top: 0, left: 0, right: 0,
-                background: 'linear-gradient(to bottom, rgba(0,0,0,0.65) 0%, transparent 100%)',
-                padding: '6px 6px 14px',
+                background: 'linear-gradient(to bottom, rgba(0,0,0,0.7) 0%, transparent 100%)',
+                padding: '6px 6px 16px',
                 display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                 gap: 4,
               }}
             >
-              {/* Stream toggle */}
-              <button
-                onClick={toggleStream}
-                title={streamType === 'main' ? 'Switch to Sub' : 'Switch to Main'}
-                style={btnStyle}
-              >
+              <button onClick={toggleStream} title="Toggle stream quality" style={btnStyle}>
                 {streamType === 'main' ? 'MAIN' : 'SUB'}
               </button>
-
               <div style={{ display: 'flex', gap: 4 }}>
                 <button onClick={handleSnapshot} title="Snapshot" style={btnStyle}>📷</button>
-                {pipSupported && (
-                  <button onClick={handlePiP} title="Picture in Picture" style={btnStyle}>⧉</button>
-                )}
+                {pipSupported && <button onClick={handlePiP} title="Picture in Picture" style={btnStyle}>⧉</button>}
                 <button onClick={handleFullscreen} title="Fullscreen" style={btnStyle}>⛶</button>
               </div>
             </div>
@@ -185,12 +184,13 @@ export const VideoPlayer: React.FC<Props> = ({
 
 const btnStyle: React.CSSProperties = {
   padding: '2px 7px',
-  background: 'rgba(0,0,0,0.55)',
+  background: 'rgba(0,0,0,0.6)',
   color: '#fff',
   fontSize: 10,
   fontWeight: 600,
-  border: 'none',
+  border: '1px solid rgba(255,255,255,0.15)',
   borderRadius: 3,
   cursor: 'pointer',
   lineHeight: '18px',
+  backdropFilter: 'blur(4px)',
 }
