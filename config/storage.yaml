@@ -1,1 +1,15 @@
-drive_assignments: []
+# Konfigurasi storage NVR
+# Sesuaikan path drive dengan yang ada di server Ubuntu
+
+threshold_pct: 10          # Cleanup otomatis jika sisa disk < 10%
+
+drives:
+  - path: /mnt/driveE      # Sesuaikan dengan mount point aktual di server
+    cameras:
+      - cam_02
+      - cam_03
+
+# Catatan:
+# - path harus sudah di-mount di server Ubuntu (cek: df -h)
+# - Jika drive berbeda per kamera, tambah entry drive baru
+# - threshold_pct: angka persentase sisa disk yang memicu cleanup

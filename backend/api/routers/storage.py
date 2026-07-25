@@ -20,7 +20,12 @@ async def _storage_status_response(request: Request):
             "free_tb": 0,
             "estimated_days_remaining": 0,
             "threshold_pct": 10,
+            "_warning": "Storage manager tidak aktif. Pastikan config/storage.yaml sudah dikonfigurasi dan backend di-restart.",
         }
+
+    # Cek berapa drive yang dikonfigurasi vs yang benar-benar ada
+    all_drives = set(storage_manager.camera_drive_map.values())
+    missing_drives = [d for d in all_drives if not Path(d).exists()]
 
     drive_statuses = storage_manager.get_all_drives_status()
 
@@ -53,7 +58,7 @@ async def _storage_status_response(request: Request):
 
     estimated_days = int(free_tb / 1) if free_tb > 0 else 0
 
-    return {
+    result = {
         "drives": drives,
         "total_tb": round(total_tb, 2),
         "used_tb": round(used_tb, 2),
@@ -61,6 +66,16 @@ async def _storage_status_response(request: Request):
         "estimated_days_remaining": estimated_days,
         "threshold_pct": storage_manager.threshold_pct,
     }
+
+    # Tambahkan info diagnostik jika ada drive yang hilang
+    if missing_drives:
+        result["_missing_drives"] = missing_drives
+        result["_warning"] = (
+            f"Drive berikut tidak ditemukan di server: {missing_drives}. "
+            "Pastikan drive sudah di-mount (cek: df -h) dan path sesuai."
+        )
+
+    return result
 
 
 @router.get("")
@@ -73,6 +88,35 @@ async def get_storage_status(request: Request, _: User = Depends(get_current_use
 async def get_storage_status_alias(request: Request, _: User = Depends(get_current_user)):
     """Alias /status → sama dengan GET /api/v1/storage (kompatibilitas frontend)."""
     return await _storage_status_response(request)
+
+
+@router.get("/debug")
+async def get_storage_debug(request: Request, _: User = Depends(require_role("admin"))):
+    """
+    Debug endpoint — tampilkan info lengkap storage manager.
+    Berguna saat storage page tidak menampilkan data.
+    """
+    storage_manager = request.app.state.storage_manager
+    if not storage_manager:
+        return {"error": "storage_manager is None — backend belum diinisialisasi dengan benar"}
+
+    all_drives = set(storage_manager.camera_drive_map.values())
+    drive_info = []
+    for d in all_drives:
+        p = Path(d)
+        info = {"path": d, "exists": p.exists()}
+        if p.exists():
+            import shutil
+            usage = shutil.disk_usage(d)
+            info["total_gb"] = round(usage.total / (1024**3), 2)
+            info["free_gb"] = round(usage.free / (1024**3), 2)
+        drive_info.append(info)
+
+    return {
+        "camera_drive_map": storage_manager.camera_drive_map,
+        "threshold_pct": storage_manager.threshold_pct,
+        "drives": drive_info,
+    }
 
 
 @router.get("/stats/cameras")
