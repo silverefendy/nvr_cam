@@ -1,4 +1,5 @@
-import { apiClient } from './client'
+﻿path = "frontend/src/api/recordings.ts"
+content = """import { apiClient } from './client'
 import type { Recording } from "@/types"
 
 export const recordingsApi = {
@@ -31,3 +32,6 @@ export const recordingsApi = {
   protect:     (id: number) => apiClient.post(`/recordings/${id}/protect`).then(r => r.data),
   delete:      (id: number) => apiClient.delete(`/recordings/${id}`),
 }
+"""
+open(path, "w", encoding="utf-8").write(content)
+print("OK recordings.ts")

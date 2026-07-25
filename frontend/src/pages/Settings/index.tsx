@@ -31,11 +31,13 @@ export default function SettingsPage() {
   const { data: systemConfig, isLoading: systemLoading } = useQuery({
     queryKey: ["config-system"],
     queryFn: async () => {
-      const response = await fetch('/api/v1/config/system', {
-        headers: { Authorization: `Bearer ${localStorage.getItem('access_token')}` }
-      })
-      if (!response.ok) return { data: {} }
-      return response.json()
+      const { apiClient } = await import('@/api/client')
+      try {
+        const res = await apiClient.get('/config/system')
+        return res.data
+      } catch {
+        return { data: {} }
+      }
     },
     retry: false,
   })
@@ -49,16 +51,9 @@ export default function SettingsPage() {
 
   const updateSystemMutation = useMutation({
     mutationFn: async (data: Record<string, any>) => {
-      const response = await fetch('/api/v1/config/system', {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${localStorage.getItem('access_token')}`,
-        },
-        body: JSON.stringify(data),
-      })
-      if (!response.ok) throw new Error('Gagal menyimpan')
-      return response.json()
+      const { apiClient } = await import('@/api/client')
+      const response = await apiClient.put('/config/system', data)
+      return response.data
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["config-system"] })

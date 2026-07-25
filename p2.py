@@ -1,4 +1,5 @@
-import { apiClient } from './client'
+﻿path = "frontend/src/api/storage.ts"
+content = """import { apiClient } from './client'
 import type { StorageStatus } from "@/types"
 
 export const storageApi = {
@@ -24,3 +25,6 @@ export interface CameraStorageStat {
   file_count: number
   total_mb:   number
 }
+"""
+open(path, "w", encoding="utf-8").write(content)
+print("OK storage.ts")
