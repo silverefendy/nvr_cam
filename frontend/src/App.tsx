@@ -26,19 +26,23 @@ const queryClient = new QueryClient({
 
 function ProtectedLayout() {
   const { isAuthenticated } = useAuthStore()
-
   if (!isAuthenticated) return <Navigate to="/login" replace />
 
   return (
-    <div className="flex h-screen bg-slate-100 text-slate-800 overflow-hidden">
+    /*
+      Pakai 100dvh (dynamic viewport height) bukan h-screen (100vh).
+      100dvh lebih akurat di mobile dan browser modern.
+      overflow:hidden di sini agar tidak ada scroll di level ini.
+      Semua scroll harus terjadi di dalam komponen masing-masing.
+    */
+    <div style={{ display: 'flex', width: '100vw', height: '100dvh', overflow: 'hidden', background: '#0f1117' }}>
       <Sidebar />
       {/*
-        KEY FIX: Tambah height: '100%' ke main.
-        flex-1 saja tidak cukup -- flex-1 mengatur LEBAR oleh parent.
-        Untuk TINGGI, <main> perlu height: 100% explicit
-        agar LiveView bisa pakai height: 100% dan grid bisa mengisi penuh.
+        main: flex:1 agar mengisi sisa lebar, height:100% agar mengisi
+        tinggi parent (100dvh), overflow:hidden agar tidak ada scroll di sini.
+        min-width:0 penting agar flex child tidak overflow horizontal.
       */}
-      <main className="flex-1 overflow-hidden" style={{ height: '100%' }}>
+      <main style={{ flex: 1, height: '100%', overflow: 'hidden', minWidth: 0, display: 'flex', flexDirection: 'column' }}>
         <Routes>
           <Route path="/live"     element={<LiveViewPage />} />
           <Route path="/playback" element={<PlaybackPage />} />
