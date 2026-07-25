@@ -2,7 +2,7 @@
 ## Ringkasan Proyek NVR CCTV Custom
 
 **Dibuat:** 22 Juli 2026  
-**Diperbarui:** 25 Juli 2026 (Sesi #011 — Integration Test Debugging)  
+**Diperbarui:** 22 Juli 2026 (Sesi #009 — lanjutan)  
 **Sumber:** Audit kode + dokumen repo
 
 ---
@@ -95,33 +95,10 @@
 
 ---
 
-## Status Sesi Terakhir — Sesi #011 (25 Juli 2026)
-
-**Scope:** Analisis output integration test yang gagal
-
-### Hasil Test Run
-
-| Test Suite | Hasil | Root Cause |
-|-----------|-------|------------|
-| `test_visit_lifecycle.py` | 6 FAILED, 1 passed | BUG-038: `visits.company_id` NULL di fixture |
-| `test_api_key_workflow.py::test_create_api_key_returns_201` | 1 FAILED | BUG-039: `ApiKeyCreateResponse` field `api_key` missing |
-| `test_qr_checkin_idor_regression.py` | 2 ERROR | BUG-038: sama — `company_id` NULL saat insert Visit |
-
-### Bug Baru Teridentifikasi
-
-| ID | Bug | Status |
-|----|-----|--------|
-| BUG-038 | `visits.company_id` NOT NULL constraint fail — fixture test tidak set `company_id` saat buat Visit | ⏳ Belum fix |
-| BUG-039 | `ApiKeyCreateResponse.model_validate(api_key)` fail karena field `api_key` (plain key) tidak ada di ORM object | ⏳ Belum fix |
-
----
-
 ## Fitur Prioritas Berikutnya
 
 | Batch | Fitur | Status |
 |-------|-------|--------|
-| Sesi #011 fix | BUG-038: `company_id` NULL di Visit fixture | ⏳ |
-| Sesi #011 fix | BUG-039: `ApiKeyCreateResponse` schema fix | ⏳ |
 | Batch 3 | Alert disk kritis via Telegram (F-10) | ⏳ |
 | Batch 3 | Jadwal cleanup terjadwal dari UI (F-09) | ⏳ |
 | Batch 3 | Statistik storage per kamera (F-08) | ⏳ |
@@ -148,7 +125,7 @@ Lihat **ISSUES.md** untuk daftar lengkap semua issue dan statusnya.
 | Deployment | 7 | 9 |
 | **TOTAL** | **86** | **130** |
 
-**Progress: 86/130 fitur selesai (66%)**
+**Progress: 86/130 fitur selesai (66%) — naik dari 85 setelah D-09 Download Rekaman**
 
 ---
 
@@ -174,5 +151,5 @@ Lihat **ISSUES.md** untuk daftar lengkap semua issue dan statusnya.
 | `PROGRESS.md` | Timeline sesi + bug tracker historis |
 | `HANDOFF.md` | Panduan handoff ke AI baru |
 | `ISSUES.md` | Issue tracker aktif — status per fitur |
-| `AUDIT_REPORT.md` | Laporan teknis lengkap |
+| `AUDIT_REPORT.md` | Laporan audit teknis lengkap |
 | `Docs/NVR_CAM_Blueprint.md` | Arsitektur teknis sistem |
