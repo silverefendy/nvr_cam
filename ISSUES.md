@@ -2,7 +2,7 @@
 ## Issue Tracker & Status Penyelesaian
 
 **Dibuat:** 22 Juli 2026  
-**Diperbarui:** 25 Juli 2026, 10:00 WIB (Sesi #011 — Integration Test Debugging)  
+**Diperbarui:** 24 Juli 2026, 18:30 WIB (Sesi #010 — Debugging Docker + UI Redesign)  
 **Repo:** https://github.com/silverefendy/nvr_cam
 
 > File ini mencatat semua issue/task yang sedang dikerjakan atau sudah selesai.  
@@ -20,32 +20,6 @@
 | ⏭️ | Ditunda / skip untuk sekarang |
 | ❌ | Dibatalkan |
 | ⚠️ | Perlu verifikasi lanjut |
-
----
-
-## 🐛 Bug Fixes Sesi #011 — Integration Test Debugging
-
-> **Tanggal:** 25 Juli 2026
-> **Scope:** 3 test suite gagal — `test_visit_lifecycle`, `test_api_key_workflow`, `test_qr_checkin_idor_regression`
-
-| ID | Bug | Root Cause | Status |
-|----|-----|------------|--------|
-| BUG-038 | `NOT NULL constraint failed: visits.company_id` — 8 test fail di `test_visit_lifecycle` + `test_qr_checkin_idor_regression` | Fixture test buat `Visit` object tanpa set `company_id`. Kolom `company_id` di tabel `visits` NOT NULL. Fix: di setiap tempat fixture create `Visit`, tambah `company_id` yang diambil dari `visit_request.company_id` atau `host_employee.company_id`. File terdampak: `test_qr_checkin_idor_regression.py` baris 129–142, dan kemungkinan fixture shared di `conftest.py`. | ⏳ Belum fix |
-| BUG-039 | `ApiKeyCreateResponse` validation error: field `api_key` required tapi missing — `test_create_api_key_returns_201` fail | `api_key_service.py` baris 68 memanggil `ApiKeyCreateResponse.model_validate(api_key)` terhadap model ORM, tapi schema `ApiKeyCreateResponse` punya field `api_key` (plain text key) yang tidak ada di model ORM karena plain key tidak disimpan ke DB. Fix: service harus pass `api_key=plain_key_string` secara eksplisit ke constructor response schema, bukan model_validate ORM object langsung. | ⏳ Belum fix |
-
-### Detail Lokasi File
-
-| Bug | File | Baris | Action |
-|-----|------|-------|--------|
-| BUG-038 | `tests/integration/test_qr_checkin_idor_regression.py` | 129–142 | Tambah `company_id=...` saat create Visit |
-| BUG-038 | `tests/integration/test_visit_lifecycle.py` | Semua fixture create Visit | Tambah `company_id=...` |
-| BUG-038 | `tests/conftest.py` (jika ada shared fixture) | — | Cek & tambah `company_id` |
-| BUG-039 | `app/services/api_key_service.py` | 68 | Ganti `model_validate(api_key)` → `ApiKeyCreateResponse(api_key=plain_key, **api_key.__dict__)` atau konstruksi manual |
-| BUG-039 | `app/schemas/api_key.py` | — | Pastikan field `api_key: str` ada di `ApiKeyCreateResponse` |
-
-### Peringatan Tambahan (DeprecationWarning)
-> Bukan error, tapi sebaiknya difix di sesi berikutnya:
-> - `datetime.utcnow()` deprecated — ganti ke `datetime.now(datetime.UTC)` di semua test file dan SQLAlchemy model default
 
 ---
 
@@ -141,7 +115,7 @@
 
 ---
 
-## ❓ Yang Masih Perlu Diverifikasi (Carry-over)
+## ❓ Yang Masih Perlu Diverifikasi (Carry-over dari Sesi #010)
 
 | # | Item | Cara Verifikasi |
 |---|------|-----------------|
@@ -149,8 +123,6 @@
 | 2 | 403 di `/api/v1/config/system` | Cek role user di DB: `SELECT username, role FROM users;` |
 | 3 | HLS stream 404 sudah resolved setelah volume mount fix | Tes saat kamera fisik online |
 | 4 | Redesign halaman Storage, Playback, Events, Cameras, Users, Settings | Belum dikerjakan |
-| 5 | BUG-038 fix — `visits.company_id` NULL di test fixture | Setelah fix, jalankan `pytest tests/integration/ -q` |
-| 6 | BUG-039 fix — `ApiKeyCreateResponse` field `api_key` | Setelah fix, jalankan `pytest tests/integration/test_api_key_workflow.py -q` |
 
 ---
 
@@ -268,8 +240,6 @@
 | BUG-035 | Sidebar mojibake emoji (encoding bukan UTF-8) | ✅ Fixed sesi #010 |
 | BUG-036 | HLS volume tidak di-mount ke container frontend | ✅ Fixed sesi #010 |
 | BUG-037 | Zustand `user` null setelah refresh → menu tidak muncul | ✅ Fixed sesi #010 |
-| BUG-038 | `visits.company_id` NULL di test fixture → 8 test fail | ⏳ Belum fix sesi #011 |
-| BUG-039 | `ApiKeyCreateResponse` field `api_key` missing → 1 test fail | ⏳ Belum fix sesi #011 |
 | BUG-013 | Flutter analyze belum diverifikasi | ⏭️ nanti |
 | BUG-019 | structlog dead code | ⏭️ skip |
 
@@ -284,6 +254,5 @@
 | Batch 3 — Alert Disk | 3 fitur (F-08, F-09, F-10) | ⏳ Belum |
 | Bug fixes sesi #009 | 3 bug (BUG-025–027) | ✅ Selesai |
 | Bug fixes sesi #010 | 10 bug (BUG-028–037) | ✅ 9 fixed, 1 pending |
-| Bug fixes sesi #011 | 2 bug (BUG-038–039) | ⏳ Belum fix |
 | UI Redesign sesi #010 | 8 file diubah ke tema terang | ✅ Sebagian (6 halaman sisa) |
 | Sisa backlog | ~38 fitur | ⏳ Belum dijadwalkan |
