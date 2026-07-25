@@ -10,8 +10,12 @@ Catatan implementasi:
 - Codec HEVC (H.265) dari kamera fisik tidak didukung hls.js di browser.
   Recorder otomatis deteksi codec via ffprobe dan aktifkan transcode ke H.264
   jika diperlukan.
+- Saat recorder di-restart (ganti IP/config), file HLS lama dibersihkan dulu
+  agar FFmpeg baru tidak baca manifest stale yang referensikan segment lama.
 """
 import asyncio
+import glob
+import os
 from pathlib import Path
 from datetime import datetime, timezone
 from backend.core.logging import get_logger
@@ -62,6 +66,20 @@ class CameraRecorder:
                         pass
         self._record_proc = None
         self._hls_proc = None
+
+    def _clear_hls_files(self, hls_dir: Path):
+        """
+        Hapus semua file HLS lama (*.ts dan index.m3u8) sebelum FFmpeg baru start.
+        Ini penting saat ganti IP/config — manifest lama mereferensikan
+        segment dari RTSP sebelumnya yang menyebabkan error di FFmpeg baru.
+        """
+        try:
+            for f in hls_dir.glob("*.ts"):
+                f.unlink(missing_ok=True)
+            for f in hls_dir.glob("*.m3u8"):
+                f.unlink(missing_ok=True)
+        except Exception as e:
+            logger.warning(f"[{self.camera_id}] Gagal bersihkan file HLS lama: {e}")
 
     async def _run_recording_loop(self):
         """Loop recording 24/7 dengan auto-reconnect."""
@@ -118,6 +136,9 @@ class CameraRecorder:
         Otomatis deteksi codec via ffprobe saat pertama start:
         - HEVC/H.265 → transcode ke H.264 (kompatibel hls.js di semua browser)
         - H.264 → stream copy (hemat CPU)
+
+        File HLS lama dibersihkan sebelum FFmpeg baru dijalankan untuk
+        menghindari konflik segment saat ganti IP/config kamera.
         """
         # Nama direktori harus cocok dengan yang diminta Nginx:
         # /hls/cam_01_sub/index.m3u8 → /var/lib/nvr_cam/hls/cam_01_sub/
@@ -125,6 +146,9 @@ class CameraRecorder:
         hls_dir.mkdir(parents=True, exist_ok=True)
 
         rtsp_url = self.camera.get("rtsp_sub") or self.camera["rtsp_main"]
+
+        # Bersihkan file HLS lama sebelum start — penting saat ganti IP/config
+        self._clear_hls_files(hls_dir)
 
         # Probe codec sekali saat pertama loop — run_in_executor agar tidak block
         loop = asyncio.get_event_loop()
@@ -134,11 +158,11 @@ class CameraRecorder:
         if force_transcode:
             logger.info(
                 f"[{self.camera_id}] Codec HEVC terdeteksi ({codec!r}) "
-                f"→ aktifkan transcode H.264 untuk kompatibilitas browser"
+                f"\u2192 aktifkan transcode H.264 untuk kompatibilitas browser"
             )
         else:
             logger.info(
-                f"[{self.camera_id}] Codec: {codec or 'unknown'} → stream copy (tanpa transcode)"
+                f"[{self.camera_id}] Codec: {codec or 'unknown'} \u2192 stream copy (tanpa transcode)"
             )
 
         while self.is_running:
@@ -171,7 +195,7 @@ class CameraRecorder:
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                logger.error(f"[{self.camera_id}] Error HLS loop: {e}")
+tml        logger.error(f"[{self.camera_id}] Error HLS loop: {e}")
                 if self.is_running:
                     await asyncio.sleep(10)
 

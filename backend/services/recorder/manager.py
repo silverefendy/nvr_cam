@@ -42,12 +42,21 @@ class RecordingManager:
         self.recorders: dict[str, CameraRecorder] = {}
         self._running = False
         self._reconnect_delay = 30
+        # Per-camera lock: pastikan restart_camera tidak berjalan concurrent
+        # untuk kamera yang sama (misal: user save 3x berturut-turut).
+        self._restart_locks: dict[str, asyncio.Lock] = {}
 
     @classmethod
     def get_instance(cls) -> "RecordingManager":
         if cls._instance is None:
             cls._instance = cls()
         return cls._instance
+
+    def _get_restart_lock(self, camera_id: str) -> asyncio.Lock:
+        """Ambil (atau buat) lock untuk camera_id tertentu."""
+        if camera_id not in self._restart_locks:
+            self._restart_locks[camera_id] = asyncio.Lock()
+        return self._restart_locks[camera_id]
 
     async def load_cameras_from_db(self) -> list[dict]:
         """Load active cameras from database."""
@@ -79,24 +88,37 @@ class RecordingManager:
         self.recorders.clear()
 
     async def restart_camera(self, camera_id: str):
-        """Restart recording for a single camera (load fresh config from DB)."""
-        # Stop recorder lama jika ada
-        if camera_id in self.recorders:
-            await self.recorders[camera_id].stop()
-            del self.recorders[camera_id]
+        """
+        Restart recording for a single camera (load fresh config from DB).
 
-        # Load config terbaru dari DB
-        async with AsyncSessionLocal() as db:
-            repo = CameraRepository(db)
-            cam = await repo.get_by_id(camera_id)
-            if cam and cam.is_active:
-                camera_dict = _camera_to_dict(cam)
-                recorder = CameraRecorder(camera_dict)
-                self.recorders[camera_id] = recorder
-                asyncio.create_task(recorder.start())
-                logger.info(f"Restarted recording for camera {camera_id}")
-            else:
-                logger.warning(f"Camera {camera_id} not found or inactive — recorder not started")
+        Menggunakan per-camera asyncio.Lock agar tidak bisa dijalankan
+        concurrent untuk kamera yang sama. Jika ada restart yang sedang
+        berjalan, yang baru akan menunggu sampai selesai — sehingga
+        konfigurasi terbaru yang selalu dipakai.
+        """
+        lock = self._get_restart_lock(camera_id)
+        async with lock:
+            # Stop recorder lama jika ada
+            if camera_id in self.recorders:
+                await self.recorders[camera_id].stop()
+                del self.recorders[camera_id]
+
+            # Beri jeda singkat agar proses FFmpeg lama benar-benar mati
+            # dan melepas file handle HLS sebelum recorder baru start.
+            await asyncio.sleep(2)
+
+            # Load config terbaru dari DB
+            async with AsyncSessionLocal() as db:
+                repo = CameraRepository(db)
+                cam = await repo.get_by_id(camera_id)
+                if cam and cam.is_active:
+                    camera_dict = _camera_to_dict(cam)
+                    recorder = CameraRecorder(camera_dict)
+                    self.recorders[camera_id] = recorder
+                    asyncio.create_task(recorder.start())
+                    logger.info(f"Restarted recording for camera {camera_id}")
+                else:
+                    logger.warning(f"Camera {camera_id} not found or inactive — recorder not started")
 
     def get_status(self, camera_id: str = None) -> dict | bool:
         """Return status for specific camera or all cameras."""
