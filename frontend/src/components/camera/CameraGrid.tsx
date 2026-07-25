@@ -15,13 +15,10 @@ export const CameraGrid: React.FC = () => {
   const { cameras, selectedCameras, gridSize, fullscreenCameraId, setFullscreen, reorderCameras } = useCameraStore()
   const nameMap = Object.fromEntries(cameras.map(c => [c.id, c.name]))
 
-  // Drag-drop state
   const dragIndexRef = useRef<number | null>(null)
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null)
 
-  const handleDragStart = (index: number) => {
-    dragIndexRef.current = index
-  }
+  const handleDragStart = (index: number) => { dragIndexRef.current = index }
   const handleDragOver = (e: React.DragEvent, index: number) => {
     e.preventDefault()
     setDragOverIndex(index)
@@ -29,9 +26,7 @@ export const CameraGrid: React.FC = () => {
   const handleDrop = (e: React.DragEvent, toIndex: number) => {
     e.preventDefault()
     const fromIndex = dragIndexRef.current
-    if (fromIndex !== null && fromIndex !== toIndex) {
-      reorderCameras(fromIndex, toIndex)
-    }
+    if (fromIndex !== null && fromIndex !== toIndex) reorderCameras(fromIndex, toIndex)
     dragIndexRef.current = null
     setDragOverIndex(null)
   }
@@ -41,9 +36,7 @@ export const CameraGrid: React.FC = () => {
   }
 
   const cols = COLS[gridSize]
-  // Hitung berapa baris yang benar-benar terisi (minimal 1)
   const rows = Math.max(1, Math.ceil(selectedCameras.length / cols))
-  // Total slot = baris × kolom (termasuk slot kosong untuk mengisi grid)
   const totalSlots = rows * cols
 
   return (
@@ -57,22 +50,28 @@ export const CameraGrid: React.FC = () => {
       )}
 
       {/*
-        KEY FIX: pakai gridTemplateRows dengan `repeat(N, 1fr)` agar setiap baris
-        mengambil tinggi yang sama dan total grid mengisi container penuh.
-        Tanpa ini, baris tidak punya tinggi dan semua kamera menumpuk di atas.
+        KUNCI ADAPTIVE GRID:
+        - position: absolute + inset: 0  →  grid mengisi TEPAT area parent,
+          tanpa tergantung pada height: 100% chain yang sering bermasalah.
+        - gridTemplateRows: repeat(N, 1fr)  →  setiap baris dapat tinggi merata.
+        - overflow: hidden  →  pastikan video tidak bisa "membesar" keluar.
+
+        Kenapa position:absolute lebih andal dari height:100%?
+        Karena absolute mengacu ke nearest positioned ancestor (position:relative
+        di parent), bukan ke computed height — lebih prediktif di semua browser.
       */}
       <div
         style={{
+          position: 'absolute',
+          inset: 0,
           display: 'grid',
-          width: '100%',
-          height: '100%',
           gridTemplateColumns: `repeat(${cols}, 1fr)`,
           gridTemplateRows: `repeat(${rows}, 1fr)`,
           gap: '2px',
           background: '#000',
+          overflow: 'hidden',
         }}
       >
-        {/* Slot kamera yang ada */}
         {selectedCameras.map((id, index) => (
           <div
             key={id}
@@ -87,7 +86,7 @@ export const CameraGrid: React.FC = () => {
               outlineOffset: '-2px',
               cursor: 'grab',
               overflow: 'hidden',
-              minHeight: 0,   // penting agar flex/grid children tidak overflow
+              minHeight: 0,
               minWidth: 0,
             }}
           >
@@ -97,22 +96,13 @@ export const CameraGrid: React.FC = () => {
               className="w-full h-full"
               showControls
             />
-            {/* Drag indicator badge — muncul saat hover */}
             <div
               className="drag-handle"
               style={{
-                position: 'absolute',
-                top: 4,
-                left: 4,
-                opacity: 0,
-                transition: 'opacity 0.15s',
-                pointerEvents: 'none',
-                background: 'rgba(0,0,0,0.6)',
-                borderRadius: 3,
-                padding: '1px 5px',
-                color: '#fff',
-                fontSize: 9,
-                userSelect: 'none',
+                position: 'absolute', top: 4, left: 4,
+                opacity: 0, transition: 'opacity 0.15s', pointerEvents: 'none',
+                background: 'rgba(0,0,0,0.6)', borderRadius: 3,
+                padding: '1px 5px', color: '#fff', fontSize: 9, userSelect: 'none',
               }}
             >
               ⠿
@@ -120,22 +110,14 @@ export const CameraGrid: React.FC = () => {
           </div>
         ))}
 
-        {/* Slot kosong untuk mengisi sisa grid agar layout rapi */}
         {Array.from({ length: Math.max(0, totalSlots - selectedCameras.length) }).map((_, i) => (
-          <div
-            key={`empty-${i}`}
-            style={{ background: '#0a0a0a', minHeight: 0, minWidth: 0 }}
-          />
+          <div key={`empty-${i}`} style={{ background: '#0a0a0a', minHeight: 0, minWidth: 0 }} />
         ))}
       </div>
 
       <style>{`
-        [draggable="true"]:hover .drag-handle {
-          opacity: 1 !important;
-        }
-        [draggable="true"] {
-          user-select: none;
-        }
+        [draggable="true"]:hover .drag-handle { opacity: 1 !important; }
+        [draggable="true"] { user-select: none; }
       `}</style>
     </>
   )
