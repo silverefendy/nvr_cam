@@ -1,0 +1,25 @@
+# Konfigurasi sistem global
+
+storage:
+  threshold_pct: 10        # trigger cleanup jika free disk < 10%
+  check_interval_min: 15   # cek kapasitas tiap 15 menit
+
+recorder:
+  segment_duration_s: 3600  # 1 jam per file
+  reconnect_delay_s: 30     # delay sebelum reconnect kamera
+
+hls:
+  segment_duration_s: 2     # HLS segment 2 detik untuk live view
+  segment_count: 6          # simpan 6 segment (12 detik buffer)
+
+motion:
+  frame_skip: 8             # analisis tiap 8 frame dari stream
+  cooldown_s: 60            # min jeda antar notifikasi per kamera
+  threshold_pct: 1.5        # % area yang bergerak = motion detected
+
+encoder:
+  av1_crf: 35               # quality AV1 (28=high, 40=small)
+  av1_preset: 8             # speed (0=lambat/kecil, 12=cepat/besar)
+  schedule_start: "01:00"   # mulai encode AV1
+  schedule_stop:  "05:00"   # stop encode AV1
+  max_parallel: 3           # max kamera di-encode bersamaan

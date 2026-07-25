@@ -25,6 +25,7 @@
     env_file: .env
     volumes:
       - ./config:/app/config
+      - D:/nvr_recordings:/mnt/driveA
       - hls_data:/var/lib/nvr_cam/hls
       - snapshot_data:/var/lib/nvr_cam/snapshots
     ports:

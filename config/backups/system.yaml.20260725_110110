@@ -17,4 +17,4 @@ encoder:
   schedule_start: 01:00
   schedule_stop: 05:00
   max_parallel: 3
-segment_duration_s: 300
+segment_duration_s: 1800
