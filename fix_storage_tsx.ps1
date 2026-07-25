@@ -1,4 +1,16 @@
-﻿import { useState, useEffect } from "react"
+# =============================================================================
+# fix_storage_tsx.ps1
+# Jalankan dari root repo: cd C:\Users\Efendy\documents\git\nvr_cam
+# .\fix_storage_tsx.ps1
+#
+# Fix: syncMutation dideklarasi tapi tombolnya tidak dipasang di JSX
+# Solusi: tulis ulang Storage/index.tsx lengkap dengan tombol Sync di filter bar
+# =============================================================================
+
+Write-Host "=== FIX Storage/index.tsx ===" -ForegroundColor Cyan
+
+$content = @'
+import { useState, useEffect } from "react"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { apiClient } from "@/api/client"
 import { storageApi } from "@/api/storage"
@@ -118,10 +130,10 @@ export default function StoragePage() {
   const getUsedPct    = (d: DriveStatus) => Math.round((d.used_gb / d.total_gb) * 100)
 
   const tabs: { id: Tab; label: string; icon: string }[] = [
-    { id: "drives",     label: "Drive",         icon: "ðŸ’¾" },
-    { id: "recordings", label: "Rekaman",        icon: "ðŸŽžï¸" },
-    { id: "cameras",    label: "Per Kamera",     icon: "ðŸ“·" },
-    { id: "schedule",   label: "Jadwal Cleanup", icon: "ðŸ•" },
+    { id: "drives",     label: "Drive",         icon: "💾" },
+    { id: "recordings", label: "Rekaman",        icon: "🎞️" },
+    { id: "cameras",    label: "Per Kamera",     icon: "📷" },
+    { id: "schedule",   label: "Jadwal Cleanup", icon: "🕐" },
   ]
 
   const cardStyle: React.CSSProperties = {
@@ -135,7 +147,7 @@ export default function StoragePage() {
 
       {/* Header */}
       <div style={{ ...cardStyle, padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}>
-        <span style={{ fontSize: 16 }}>ðŸ’¾</span>
+        <span style={{ fontSize: 16 }}>💾</span>
         <h1 style={{ fontSize: 15, fontWeight: 700, color: text, margin: 0 }}>Storage</h1>
         {storage && (
           <div style={{ display: 'flex', gap: 12, marginLeft: 8, flexWrap: 'wrap' }}>
@@ -159,7 +171,7 @@ export default function StoragePage() {
             color: message.type === 'success' ? '#10b981' : '#ef4444',
             border: `1px solid ${message.type === 'success' ? '#10b98140' : '#ef444440'}`,
           }}>
-            {message.type === 'success' ? 'âœ“' : 'âœ—'} {message.text}
+            {message.type === 'success' ? '✓' : '✗'} {message.text}
           </span>
         )}
         <button
@@ -172,7 +184,7 @@ export default function StoragePage() {
             color: '#fff', border: 'none', cursor: 'pointer',
           }}
         >
-          {cleanupMutation.isPending ? 'Membersihkan...' : 'ðŸ—‘ï¸ Cleanup'}
+          {cleanupMutation.isPending ? 'Membersihkan...' : '🗑️ Cleanup'}
         </button>
       </div>
 
@@ -211,14 +223,14 @@ export default function StoragePage() {
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
                           <div>
                             <div style={{ fontSize: 14, fontWeight: 700, color: text, display: 'flex', alignItems: 'center', gap: 8 }}>
-                              <span>ðŸ’¾</span> {drive.path}
+                              <span>💾</span> {drive.path}
                               {freePct < (storage.threshold_pct ?? 10) && (
-                                <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 99, background: '#7f1d1d', color: '#fca5a5', fontWeight: 700 }}>âš ï¸ Kritis</span>
+                                <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 99, background: '#7f1d1d', color: '#fca5a5', fontWeight: 700 }}>⚠️ Kritis</span>
                               )}
                             </div>
                             <div style={{ fontSize: 11, color: sub, marginTop: 3 }}>
                               {drive.cameras?.length ?? 0} kamera terdaftar
-                              {drive.cameras?.length > 0 && ` Â· ${drive.cameras.join(', ')}`}
+                              {drive.cameras?.length > 0 && ` · ${drive.cameras.join(', ')}`}
                             </div>
                           </div>
                           <div style={{ textAlign: 'right' }}>
@@ -257,7 +269,7 @@ export default function StoragePage() {
         {activeTab === 'recordings' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
 
-            {/* Filter bar â€” tombol Sync ada di sini */}
+            {/* Filter bar — tombol Sync ada di sini */}
             <div style={{ ...cardStyle, padding: '12px 16px', display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
               <span style={{ fontSize: 12, fontWeight: 600, color: sub }}>Filter:</span>
               <select
@@ -276,7 +288,7 @@ export default function StoragePage() {
                   style={{ padding: '6px 8px', borderRadius: 7, fontSize: 12, border: `1px solid ${cardB}`, background: inputBg, color: text }} />
               </div>
 
-              {/* TOMBOL SYNC â€” ini yang sebelumnya tidak terpasang */}
+              {/* TOMBOL SYNC — ini yang sebelumnya tidak terpasang */}
               <button
                 onClick={() => {
                   if (confirm('Scan semua file .mp4 di storage dan daftarkan ke database?\nProses ini mungkin butuh beberapa detik.'))
@@ -290,7 +302,7 @@ export default function StoragePage() {
                   whiteSpace: 'nowrap',
                 }}
               >
-                {syncMutation.isPending ? 'â³ Scanning...' : 'ðŸ”„ Sync dari Disk'}
+                {syncMutation.isPending ? '⏳ Scanning...' : '🔄 Sync dari Disk'}
               </button>
 
               <span style={{ fontSize: 11, color: sub, marginLeft: 'auto' }}>
@@ -305,11 +317,11 @@ export default function StoragePage() {
                 <div style={cardStyle}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
                     <span style={{ fontSize: 13, fontWeight: 600, color: text }}>
-                      ðŸŽžï¸ {rec.camera_id} Â· {formatDate(rec.started_at)}
+                      🎞️ {rec.camera_id} · {formatDate(rec.started_at)}
                     </span>
                     <button onClick={() => setPlayingId(null)}
                       style={{ fontSize: 12, padding: '3px 10px', borderRadius: 6, border: `1px solid ${cardB}`, background: 'transparent', color: sub, cursor: 'pointer' }}>
-                      âœ• Tutup
+                      ✕ Tutup
                     </button>
                   </div>
                   <video src={recordingsApi.playUrl(rec.id)} controls autoPlay
@@ -323,11 +335,11 @@ export default function StoragePage() {
               <div style={{ color: sub, padding: 40, textAlign: 'center' }}>Memuat rekaman...</div>
             ) : !recordings?.length ? (
               <div style={{ ...cardStyle, padding: 40, textAlign: 'center', color: sub }}>
-                <div style={{ fontSize: 32, marginBottom: 8 }}>ðŸŽžï¸</div>
+                <div style={{ fontSize: 32, marginBottom: 8 }}>🎞️</div>
                 <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 4 }}>Tidak ada rekaman ditemukan</div>
                 <div style={{ fontSize: 12, marginBottom: 12 }}>Coba ubah filter kamera atau rentang tanggal</div>
                 <div style={{ fontSize: 12, color: '#7c3aed' }}>
-                  ðŸ’¡ Jika file .mp4 sudah ada di disk, klik tombol <strong>ðŸ”„ Sync dari Disk</strong> di atas untuk mendaftarkannya ke database
+                  💡 Jika file .mp4 sudah ada di disk, klik tombol <strong>🔄 Sync dari Disk</strong> di atas untuk mendaftarkannya ke database
                 </div>
               </div>
             ) : (
@@ -353,7 +365,7 @@ export default function StoragePage() {
                       >
                         <td style={{ padding: '10px 14px', fontWeight: 600, color: text }}>
                           {rec.camera_id}
-                          {rec.is_protected && <span style={{ marginLeft: 6, fontSize: 9, padding: '1px 5px', borderRadius: 99, background: isDark ? '#1e3a5f' : '#dbeafe', color: '#3b82f6' }}>ðŸ”’</span>}
+                          {rec.is_protected && <span style={{ marginLeft: 6, fontSize: 9, padding: '1px 5px', borderRadius: 99, background: isDark ? '#1e3a5f' : '#dbeafe', color: '#3b82f6' }}>🔒</span>}
                         </td>
                         <td style={{ padding: '10px 14px', color: sub, fontSize: 12 }}>{formatDate(rec.started_at)}</td>
                         <td style={{ padding: '10px 14px', color: sub }}>{formatDur(rec.duration_s)}</td>
@@ -373,16 +385,16 @@ export default function StoragePage() {
                         <td style={{ padding: '10px 14px' }}>
                           <div style={{ display: 'flex', gap: 6 }} onClick={e => e.stopPropagation()}>
                             <button onClick={() => setPlayingId(rec.id === playingId ? null : rec.id)}
-                              style={{ ...smallBtn, background: isDark ? '#1a2a3a' : '#dbeafe', color: '#3b82f6' }}>â–¶ Putar</button>
+                              style={{ ...smallBtn, background: isDark ? '#1a2a3a' : '#dbeafe', color: '#3b82f6' }}>▶ Putar</button>
                             <a href={recordingsApi.downloadUrl(rec.id)} download
-                              style={{ ...smallBtn, background: isDark ? '#1a2a1a' : '#dcfce7', color: '#10b981', textDecoration: 'none' }}>â¬‡ Unduh</a>
+                              style={{ ...smallBtn, background: isDark ? '#1a2a1a' : '#dcfce7', color: '#10b981', textDecoration: 'none' }}>⬇ Unduh</a>
                             <button onClick={() => protectMutation.mutate(rec.id)}
                               style={{ ...smallBtn, background: isDark ? '#1a1a2a' : '#ede9fe', color: '#8b5cf6' }}>
-                              {rec.is_protected ? 'ðŸ”“' : 'ðŸ”’'}
+                              {rec.is_protected ? '🔓' : '🔒'}
                             </button>
                             {!rec.is_protected && (
                               <button onClick={() => { if (confirm(`Hapus rekaman ${rec.camera_id}?`)) deleteMutation.mutate(rec.id) }}
-                                style={{ ...smallBtn, background: isDark ? '#2d0a0a' : '#fee2e2', color: '#ef4444' }}>ðŸ—‘ï¸</button>
+                                style={{ ...smallBtn, background: isDark ? '#2d0a0a' : '#fee2e2', color: '#ef4444' }}>🗑️</button>
                             )}
                           </div>
                         </td>
@@ -404,7 +416,7 @@ export default function StoragePage() {
               : (
                 <div style={{ ...cardStyle, padding: 0, overflow: 'hidden' }}>
                   <div style={{ padding: '10px 16px', borderBottom: `1px solid ${cardB}`, fontSize: 11, color: sub }}>
-                    {cameraStats.length} kamera Â· diurutkan dari penggunaan terbesar
+                    {cameraStats.length} kamera · diurutkan dari penggunaan terbesar
                   </div>
                   <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
                     <thead>
@@ -471,20 +483,20 @@ export default function StoragePage() {
                   </code>
                 </span>
               </div>
-              <p style={{ fontSize: 11, color: sub, marginTop: 6 }}>ðŸ’¡ Disarankan jam 03:00 saat traffic rendah</p>
+              <p style={{ fontSize: 11, color: sub, marginTop: 6 }}>💡 Disarankan jam 03:00 saat traffic rendah</p>
             </div>
             <button
               onClick={() => scheduleMutation.mutate({ enabled: schedEnabled, hour: schedHour, minute: schedMinute })}
               disabled={scheduleMutation.isPending}
               style={{ padding: '10px 20px', borderRadius: 8, fontSize: 13, fontWeight: 700, background: '#0284c7', color: '#fff', border: 'none', cursor: 'pointer', opacity: scheduleMutation.isPending ? 0.6 : 1 }}
             >
-              {scheduleMutation.isPending ? 'Menyimpan...' : 'ðŸ’¾ Simpan Jadwal'}
+              {scheduleMutation.isPending ? 'Menyimpan...' : '💾 Simpan Jadwal'}
             </button>
             {schedule && (
               <div style={{ marginTop: 16, padding: 12, background: isDark ? '#12151f' : '#f8fafc', borderRadius: 8, border: `1px solid ${cardB}`, fontSize: 12, color: sub }}>
                 <div>Status: <span style={{ color: schedule.enabled ? '#10b981' : sub, fontWeight: 700 }}>{schedule.enabled ? 'Aktif' : 'Nonaktif'}</span></div>
                 <div style={{ marginTop: 4 }}>Cron: <code style={{ background: isDark ? '#1a1d27' : '#e2e8f0', padding: '1px 6px', borderRadius: 4, color: text }}>{schedule.cron}</code></div>
-                <div style={{ marginTop: 6, color: '#f59e0b' }}>âš ï¸ Berlaku setelah backend di-restart</div>
+                <div style={{ marginTop: 6, color: '#f59e0b' }}>⚠️ Berlaku setelah backend di-restart</div>
               </div>
             )}
           </div>
@@ -498,3 +510,13 @@ const smallBtn: React.CSSProperties = {
   padding: '3px 8px', borderRadius: 5, fontSize: 11, fontWeight: 600,
   border: 'none', cursor: 'pointer', whiteSpace: 'nowrap',
 }
+'@
+
+Set-Content -Path "frontend\src\pages\Storage\index.tsx" -Value $content -Encoding UTF8
+Write-Host "OK: Storage/index.tsx ditulis ulang" -ForegroundColor Green
+
+Write-Host "`nLangkah selanjutnya:" -ForegroundColor Yellow
+Write-Host "  git add frontend/src/pages/Storage/index.tsx" -ForegroundColor DarkYellow
+Write-Host "  git commit -m 'fix: Storage tsx - pasang tombol Sync dari Disk ke JSX'" -ForegroundColor DarkYellow
+Write-Host "  git push" -ForegroundColor DarkYellow
+Write-Host "  docker compose up -d --build frontend" -ForegroundColor DarkYellow
