@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react'
+﻿import { useState, useEffect } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { apiClient } from '@/api/client'
+import { useTheme } from '@/store/theme'
 
 interface DriveAssignment {
   drive: string
@@ -12,58 +13,77 @@ interface DriveInfo {
   total_gb: number
   used_gb: number
   free_gb: number
-  used_pct: number
+  free_pct: number
 }
 
 interface Props {
   onSave: (data: DriveAssignment[]) => void
 }
 
+const formatGB = (gb: number) =>
+  gb >= 1000 ? `${(gb / 1024).toFixed(1)} TB` : `${gb.toFixed(0)} GB`
+
 export const StorageForm: React.FC<Props> = ({ onSave }) => {
   const [assignments, setAssignments] = useState<DriveAssignment[]>([])
+  const { isDark } = useTheme()
 
+  const card  = isDark ? '#1e2130' : '#f8fafc'
+  const cardB = isDark ? '#2a2d3a' : '#e2e8f0'
+  const text  = isDark ? '#e2e8f0' : '#1e293b'
+  const sub   = isDark ? '#64748b' : '#94a3b8'
+  const inputBg = isDark ? '#12151f' : '#fff'
+
+  // ── Config drive assignments ─────────────────────────────────────────────
   const { data: storageConfig, isLoading } = useQuery({
     queryKey: ['storage-config'],
     queryFn: async () => {
-      const res = await apiClient.get('/config/storage')
-      return res.data
+      try {
+        const res = await apiClient.get('/config/storage')
+        return res.data
+      } catch {
+        return { data: { drive_assignments: [] } }
+      }
     },
+    retry: false,
   })
 
   useEffect(() => {
-    if (storageConfig?.data?.drive_assignments) {
+    if (storageConfig?.data?.drive_assignments?.length) {
       setAssignments(storageConfig.data.drive_assignments)
     }
   }, [storageConfig])
 
+  // ── Storage status (gunakan endpoint yang benar: /storage) ───────────────
   const { data: storageStatus } = useQuery({
-    queryKey: ['storage-status'],
+    queryKey: ['storage-status-form'],
     queryFn: async () => {
-      const res = await apiClient.get('/storage/status')
-      return res.data
+      try {
+        const res = await apiClient.get('/storage')
+        return res.data
+      } catch {
+        return null
+      }
     },
+    retry: false,
   })
+
+  const drives: DriveInfo[] = storageStatus?.drives ?? []
+  const availableCameras: string[] = storageStatus?.available_cameras
+    ?? drives.flatMap((d: any) => d.cameras ?? [])
 
   const updateMutation = useMutation({
     mutationFn: async (data: DriveAssignment[]) => {
       const res = await apiClient.put('/config/storage', { drive_assignments: data })
       return res.data
     },
-    onSuccess: () => {
-      onSave(assignments)
-    },
+    onSuccess: () => onSave(assignments),
   })
-
-  const handleSave = (e: React.FormEvent) => {
-    e.preventDefault()
-    updateMutation.mutate(assignments)
-  }
 
   const addCameraToDrive = (driveIndex: number, cameraId: string) => {
     setAssignments(prev => {
       const updated = [...prev]
       if (!updated[driveIndex].cameras.includes(cameraId)) {
-        updated[driveIndex].cameras.push(cameraId)
+        updated[driveIndex] = { ...updated[driveIndex], cameras: [...updated[driveIndex].cameras, cameraId] }
       }
       return updated
     })
@@ -72,119 +92,157 @@ export const StorageForm: React.FC<Props> = ({ onSave }) => {
   const removeCameraFromDrive = (driveIndex: number, cameraId: string) => {
     setAssignments(prev => {
       const updated = [...prev]
-      updated[driveIndex].cameras = updated[driveIndex].cameras.filter(c => c !== cameraId)
+      updated[driveIndex] = { ...updated[driveIndex], cameras: updated[driveIndex].cameras.filter(c => c !== cameraId) }
       return updated
     })
   }
 
-  const getDriveInfo = (drivePath: string): DriveInfo | null => {
-    if (!storageStatus?.drives) return null
-    return storageStatus.drives.find((d: DriveInfo) => d.path === drivePath) || null
-  }
+  const getDriveInfo = (drivePath: string): DriveInfo | null =>
+    drives.find((d: DriveInfo) => d.path === drivePath) ?? null
 
-  if (isLoading) {
+  if (isLoading) return (
+    <div style={{ color: sub, padding: 40, textAlign: 'center' }}>Memuat konfigurasi storage...</div>
+  )
+
+  // Kalau tidak ada data konfigurasi, tampilkan info drive dari status
+  if (assignments.length === 0) {
     return (
-      <div className="flex items-center justify-center p-8 text-gray-400">
-        Loading storage configuration...
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <div style={{
+          background: isDark ? '#1a2a1a' : '#f0fdf4', border: `1px solid ${isDark ? '#1e3a2a' : '#bbf7d0'}`,
+          borderRadius: 12, padding: 16, fontSize: 13, color: '#10b981',
+        }}>
+          ℹ️ Konfigurasi drive assignment belum tersedia di API. Drive storage terdeteksi otomatis dari sistem.
+        </div>
+
+        {/* Tampilkan drive yang terdeteksi */}
+        {drives.map((drive: DriveInfo) => {
+          const usedPct = Math.round((drive.used_gb / drive.total_gb) * 100)
+          const barColor = drive.free_pct < 10 ? '#ef4444' : drive.free_pct < 25 ? '#f59e0b' : '#10b981'
+          return (
+            <div key={drive.path} style={{ background: card, border: `1px solid ${cardB}`, borderRadius: 12, padding: 16 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                <div>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: text }}>💾 {drive.path}</div>
+                  <div style={{ fontSize: 11, color: sub, marginTop: 2 }}>
+                    {formatGB(drive.total_gb)} total · {formatGB(drive.free_gb)} sisa
+                  </div>
+                </div>
+                <div style={{ textAlign: 'right' }}>
+                  <div style={{ fontSize: 20, fontWeight: 800, color: barColor }}>{drive.free_pct?.toFixed(1)}%</div>
+                  <div style={{ fontSize: 10, color: sub }}>sisa tersedia</div>
+                </div>
+              </div>
+              <div style={{ height: 8, background: isDark ? '#12151f' : '#e2e8f0', borderRadius: 99, overflow: 'hidden' }}>
+                <div style={{ width: `${usedPct}%`, height: '100%', background: barColor, borderRadius: 99, transition: 'width 0.5s' }} />
+              </div>
+            </div>
+          )
+        })}
+
+        {drives.length === 0 && (
+          <div style={{ color: sub, padding: 40, textAlign: 'center', fontSize: 13 }}>
+            Tidak ada drive yang terdeteksi
+          </div>
+        )}
       </div>
     )
   }
 
   return (
-    <form onSubmit={handleSave} className="space-y-4">
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       {assignments.map((assignment, driveIndex) => {
         const driveInfo = getDriveInfo(assignment.drive)
-        const usedPct = driveInfo?.used_pct || 0
-        const usedColor = usedPct > 80 ? 'bg-red-500' : usedPct > 60 ? 'bg-yellow-500' : 'bg-green-500'
+        const usedPct = driveInfo ? Math.round((driveInfo.used_gb / driveInfo.total_gb) * 100) : 0
+        const barColor = driveInfo && driveInfo.free_pct < 10 ? '#ef4444'
+          : driveInfo && driveInfo.free_pct < 25 ? '#f59e0b' : '#10b981'
 
         return (
-          <div key={assignment.drive} className="bg-gray-800 rounded-lg p-4">
-            <div className="flex items-center justify-between mb-3">
+          <div key={assignment.drive} style={{ background: card, border: `1px solid ${cardB}`, borderRadius: 12, padding: 16 }}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 12 }}>
               <div>
-                <h3 className="text-lg font-semibold text-white">{assignment.drive}</h3>
+                <div style={{ fontSize: 14, fontWeight: 700, color: text }}>💾 {assignment.drive}</div>
                 {driveInfo && (
-                  <div className="text-sm text-gray-400">
-                    {driveInfo.total_gb.toFixed(0)} GB total · {usedPct.toFixed(0)}% used
+                  <div style={{ fontSize: 11, color: sub, marginTop: 2 }}>
+                    {formatGB(driveInfo.total_gb)} total · {driveInfo.free_pct?.toFixed(1)}% sisa
                   </div>
                 )}
               </div>
               {driveInfo && (
-                <div className="w-32">
-                  <div className="w-full bg-gray-700 rounded-full h-2">
-                    <div
-                      className={`h-2 rounded-full ${usedColor}`}
-                      style={{ width: `${usedPct}%` }}
-                    />
+                <div style={{ width: 120, marginTop: 4 }}>
+                  <div style={{ height: 6, background: isDark ? '#12151f' : '#e2e8f0', borderRadius: 99, overflow: 'hidden' }}>
+                    <div style={{ width: `${usedPct}%`, height: '100%', background: barColor, borderRadius: 99 }} />
                   </div>
+                  <div style={{ fontSize: 10, color: sub, marginTop: 2, textAlign: 'right' }}>{usedPct}% dipakai</div>
                 </div>
               )}
             </div>
 
-            <div className="mb-3">
-              <label className="block text-sm font-medium text-gray-300 mb-2">
-                Assigned Cameras ({assignment.cameras.length})
-              </label>
-              <div className="flex flex-wrap gap-2">
+            {/* Kamera yang sudah ter-assign */}
+            <div style={{ marginBottom: 12 }}>
+              <div style={{ fontSize: 12, fontWeight: 600, color: sub, marginBottom: 8 }}>
+                Kamera ter-assign ({assignment.cameras.length})
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
                 {assignment.cameras.map(cameraId => (
-                  <div
-                    key={cameraId}
-                    className="flex items-center gap-2 bg-gray-700 px-3 py-1.5 rounded text-sm text-white"
-                  >
-                    <span>{cameraId}</span>
+                  <div key={cameraId} style={{
+                    display: 'flex', alignItems: 'center', gap: 6,
+                    background: isDark ? '#1a2a3a' : '#dbeafe',
+                    padding: '4px 10px', borderRadius: 99, fontSize: 12, color: '#3b82f6', fontWeight: 600,
+                  }}>
+                    <span>📷 {cameraId}</span>
                     <button
-                      type="button"
                       onClick={() => removeCameraFromDrive(driveIndex, cameraId)}
-                      className="text-red-400 hover:text-red-300"
-                    >
-                      ×
-                    </button>
+                      style={{ border: 'none', background: 'transparent', color: '#ef4444', cursor: 'pointer', fontWeight: 800, padding: 0, lineHeight: 1 }}
+                    >×</button>
                   </div>
                 ))}
                 {assignment.cameras.length === 0 && (
-                  <span className="text-gray-500 text-sm italic">No cameras assigned</span>
+                  <span style={{ fontSize: 12, color: sub, fontStyle: 'italic' }}>Belum ada kamera</span>
                 )}
               </div>
             </div>
 
+            {/* Tambah kamera */}
             <div>
-              <label className="block text-sm font-medium text-gray-300 mb-2">Add Camera</label>
+              <div style={{ fontSize: 12, fontWeight: 600, color: sub, marginBottom: 6 }}>Tambah Kamera</div>
               <select
-                className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white"
-                onChange={(e) => {
-                  if (e.target.value) {
-                    addCameraToDrive(driveIndex, e.target.value)
-                    e.target.value = ''
-                  }
-                }}
                 value=""
+                onChange={e => { if (e.target.value) { addCameraToDrive(driveIndex, e.target.value); e.target.value = '' } }}
+                style={{ padding: '7px 12px', borderRadius: 8, border: `1px solid ${cardB}`, background: inputBg, color: text, fontSize: 12, cursor: 'pointer' }}
               >
-                <option value="">Select camera to add...</option>
-                {storageStatus?.available_cameras?.map((cameraId: string) => (
-                  <option key={cameraId} value={cameraId}>
-                    {cameraId}
-                  </option>
-                ))}
+                <option value="">Pilih kamera...</option>
+                {availableCameras
+                  .filter(c => !assignment.cameras.includes(c))
+                  .map((cameraId: string) => (
+                    <option key={cameraId} value={cameraId}>{cameraId}</option>
+                  ))}
               </select>
             </div>
           </div>
         )
       })}
 
-      <div className="flex justify-end pt-4 border-t border-gray-700">
+      {/* Tombol Save */}
+      <div style={{ display: 'flex', justifyContent: 'flex-end', paddingBottom: 8 }}>
         <button
-          type="submit"
+          onClick={() => updateMutation.mutate(assignments)}
           disabled={updateMutation.isPending}
-          className="px-6 py-2 bg-green-600 hover:bg-green-700 disabled:bg-gray-600 rounded text-white"
+          style={{
+            padding: '10px 24px', borderRadius: 8, fontSize: 13, fontWeight: 700,
+            background: updateMutation.isPending ? sub : '#10b981',
+            color: '#fff', border: 'none', cursor: 'pointer',
+          }}
         >
-          {updateMutation.isPending ? 'Saving...' : 'Save Storage Configuration'}
+          {updateMutation.isPending ? 'Menyimpan...' : '💾 Simpan Konfigurasi Storage'}
         </button>
       </div>
 
-      {updateMutation.error && (
-        <div className="bg-red-900/50 text-red-400 p-3 rounded">
-          Failed to save: {updateMutation.error instanceof Error ? updateMutation.error.message : 'Unknown error'}
+      {updateMutation.isError && (
+        <div style={{ padding: 12, background: isDark ? '#2d0a0a' : '#fee2e2', borderRadius: 8, color: '#ef4444', fontSize: 12 }}>
+          ✗ Gagal menyimpan. Cek apakah endpoint /config/storage tersedia di backend.
         </div>
       )}
-    </form>
+    </div>
   )
 }

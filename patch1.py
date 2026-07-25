@@ -1,4 +1,6 @@
-import axios from 'axios'
+﻿path = "frontend/src/api/client.ts"
+content = open(path, encoding="utf-8-sig").read()
+new = """import axios from 'axios'
 
 export const apiClient = axios.create({
   baseURL: '/api/v1',
@@ -31,3 +33,6 @@ apiClient.interceptors.response.use(
     return Promise.reject(error)
   }
 )
+"""
+open(path, "w", encoding="utf-8").write(new)
+print("OK client.ts")

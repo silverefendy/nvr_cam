@@ -337,7 +337,7 @@ export default function StoragePage() {
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
                   <thead>
                     <tr style={{ background: isDark ? '#12151f' : '#f8fafc', borderBottom: `1px solid ${cardB}` }}>
-                      {['Kamera', 'Mulai', 'Durasi', 'Ukuran', 'Codec', 'Aksi'].map(h => (
+                      {['Kamera', 'Mulai', 'Durasi', 'Ukuran', 'Codec', 'Path File', 'Aksi'].map(h => (
                         <th key={h} style={{ padding: '10px 14px', textAlign: 'left', fontSize: 11, fontWeight: 700, color: sub, letterSpacing: '0.04em' }}>
                           {h}
                         </th>
@@ -345,7 +345,7 @@ export default function StoragePage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {recordings.map((rec: Recording, i: number) => (
+                    {recordings.map((rec: Recording) => (
                       <tr
                         key={rec.id}
                         style={{
@@ -371,6 +371,18 @@ export default function StoragePage() {
                             background: rec.codec === 'H265' ? (isDark ? '#1e2d1e' : '#dcfce7') : (isDark ? '#1e2130' : '#f1f5f9'),
                             color: rec.codec === 'H265' ? '#10b981' : sub,
                           }}>{rec.codec}</span>
+                        </td>
+                        <td style={{ padding: '10px 14px', maxWidth: 200 }}>
+                          {rec.file_path ? (
+                            <span title={rec.file_path} style={{
+                              fontSize: 11, color: sub, fontFamily: 'monospace',
+                              display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                            }}>
+                              {rec.file_path}
+                            </span>
+                          ) : (
+                            <span style={{ fontSize: 11, color: sub }}>-</span>
+                          )}
                         </td>
                         <td style={{ padding: '10px 14px' }}>
                           <div style={{ display: 'flex', gap: 6 }} onClick={e => e.stopPropagation()}>
