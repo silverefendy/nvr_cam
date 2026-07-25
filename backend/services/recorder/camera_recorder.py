@@ -14,8 +14,6 @@ Catatan implementasi:
   agar FFmpeg baru tidak baca manifest stale yang referensikan segment lama.
 """
 import asyncio
-import glob
-import os
 from pathlib import Path
 from datetime import datetime, timezone
 from backend.core.logging import get_logger
@@ -195,7 +193,7 @@ class CameraRecorder:
             except asyncio.CancelledError:
                 break
             except Exception as e:
-tml        logger.error(f"[{self.camera_id}] Error HLS loop: {e}")
+                logger.error(f"[{self.camera_id}] Error HLS loop: {e}")
                 if self.is_running:
                     await asyncio.sleep(10)
 
