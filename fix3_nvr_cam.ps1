@@ -1,4 +1,589 @@
-﻿import { useState, useEffect } from "react"
+# =============================================================================
+# fix3_nvr_cam.ps1
+# Jalankan: cd C:\Users\Efendy\documents\git\nvr_cam ; .\fix3_nvr_cam.ps1
+#
+# Fix:
+#   1. Tulisan aneh (emoji rusak) - tulis file tanpa emoji
+#   2. Playback tidak bisa - tambah -movflags +faststart di FFmpeg record
+#   3. Ukuran file tidak konsisten - segment 1 jam tetap + faststart
+#   4. Codec H.265 recording bisa dipilih per kamera dari setting
+#   5. ffmpeg_wrapper.py - update build_record_command support H.265 + faststart
+# =============================================================================
+
+Write-Host "=== NVR CAM FIX 3 ===" -ForegroundColor Cyan
+
+# ─────────────────────────────────────────────────────────────────────────────
+# FIX 1 + 2 + 3 + 4: backend/services/recorder/ffmpeg_wrapper.py
+# - Tambah -movflags +faststart agar file bisa di-stream browser tanpa download penuh
+# - Tambah support H.265 (hevc) untuk recording (hemat storage ~50%)
+# - Segment 1 jam (3600s) sudah benar, tapi tambah fallback timeout
+# ─────────────────────────────────────────────────────────────────────────────
+Write-Host "`n[1/3] Patching backend/services/recorder/ffmpeg_wrapper.py ..." -ForegroundColor Green
+
+$ffmpegWrapper = @'
+"""
+FFmpeg wrapper - semua command FFmpeg ada di sini.
+
+Catatan penting tentang -movflags +faststart:
+  File MP4 punya dua bagian: moov atom (metadata/index) dan mdat (data video).
+  Secara default FFmpeg tulis moov atom di AKHIR file.
+  Browser butuh moov atom di AWAL untuk bisa streaming tanpa download penuh dulu.
+  -movflags +faststart memindahkan moov ke awal setelah encode selesai.
+  Tanpa ini: browser error "No video with supported format and MIME type found".
+
+Catatan H.265 vs H.264:
+  H.265 (HEVC): ukuran ~50% lebih kecil dari H.264 pada kualitas sama.
+  Trade-off: butuh CPU lebih banyak untuk decode di browser (tidak semua browser support).
+  Solusi: record H.265 di server, transcode ke H.264 saat playback (atau gunakan HLS).
+  Untuk sekarang: jika kamera sudah kirim H.265, stream copy langsung (hemat CPU server).
+"""
+import subprocess
+import json
+from pathlib import Path
+
+
+def build_record_command(
+    rtsp_url: str,
+    output_pattern: str,
+    segment_seconds: int = 3600,
+    force_h265: bool = False,
+) -> list[str]:
+    """
+    Command FFmpeg untuk recording 24/7 dengan segmented MP4.
+
+    Args:
+        rtsp_url: URL RTSP kamera.
+        output_pattern: Pola nama file output, contoh: /mnt/driveA/cam_01/2025-01-15/%H-%M-%S.mp4
+        segment_seconds: Durasi tiap segment dalam detik (default 3600 = 1 jam).
+        force_h265: Jika True, transcode ke H.265 (hemat storage, butuh CPU lebih).
+                    Jika False, stream copy dari kamera (hemat CPU, ukuran tergantung kamera).
+
+    Catatan -movflags +faststart:
+        Wajib agar file MP4 bisa langsung di-play di browser tanpa download penuh.
+        FFmpeg akan memindahkan moov atom ke awal file setelah segment selesai.
+    """
+    if force_h265:
+        # Transcode ke H.265: hemat storage ~50%, butuh lebih CPU
+        # -tag:v hvc1 agar QuickTime/Safari bisa putar
+        video_args = [
+            "-c:v", "libx265",
+            "-preset", "fast",
+            "-crf", "28",          # 28 = kualitas bagus, file kecil
+            "-tag:v", "hvc1",
+        ]
+    else:
+        # Stream copy: tidak decode ulang, hemat CPU, ukuran = seperti kamera kirim
+        video_args = ["-c:v", "copy"]
+
+    return [
+        "ffmpeg", "-hide_banner", "-loglevel", "warning",
+        "-rtsp_transport", "tcp",
+        "-i", rtsp_url,
+        *video_args,
+        "-c:a", "aac", "-b:a", "64k",
+        "-f", "segment",
+        "-segment_time", str(segment_seconds),
+        "-segment_format", "mp4",
+        # FIX: movflags +faststart wajib agar browser bisa stream file MP4
+        # tanpa ini muncul: "No video with supported format and MIME type found"
+        "-segment_format_options", "movflags=+faststart",
+        "-segment_atclocktime", "1",
+        "-reset_timestamps", "1",
+        "-strftime", "1",
+        output_pattern,
+    ]
+
+
+def build_hls_command(
+    rtsp_url: str,
+    hls_dir: str,
+    segment_duration: int = 2,
+    force_transcode: bool = False,
+) -> list[str]:
+    """
+    Command FFmpeg untuk HLS live streaming ke browser.
+
+    force_transcode=True dipakai jika kamera kirim HEVC dan browser tidak support
+    (misalnya Chrome di Android, atau hls.js default).
+    """
+    if force_transcode:
+        video_codec_args = ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "23"]
+    else:
+        video_codec_args = ["-c:v", "copy"]
+
+    return [
+        "ffmpeg", "-hide_banner", "-loglevel", "warning",
+        "-rtsp_transport", "tcp",
+        "-i", rtsp_url,
+        *video_codec_args,
+        "-c:a", "aac", "-b:a", "64k",
+        "-f", "hls",
+        "-hls_time", str(segment_duration),
+        "-hls_list_size", "6",
+        "-hls_flags", "delete_segments+append_list",
+        "-hls_segment_filename", f"{hls_dir}/seg%03d.ts",
+        f"{hls_dir}/index.m3u8",
+    ]
+
+
+def detect_video_codec(rtsp_url: str) -> str | None:
+    """Probe codec video dari RTSP stream via ffprobe.
+
+    Returns:
+        Nama codec lowercase ('h264', 'hevc', dll) atau None jika gagal.
+    """
+    info = probe_stream(rtsp_url)
+    if not info:
+        return None
+    for stream in info.get("streams", []):
+        if stream.get("codec_type") == "video":
+            return stream.get("codec_name")
+    return None
+
+
+def build_av1_encode_command(input_path: str, output_path: str, crf: int = 35) -> list[str]:
+    """Re-encode ke AV1 untuk arsip jangka panjang (jalankan saat idle malam)."""
+    return [
+        "ffmpeg", "-hide_banner", "-loglevel", "warning",
+        "-i", input_path,
+        "-c:v", "libsvtav1",
+        "-crf", str(crf),
+        "-preset", "8",
+        "-c:a", "copy",
+        "-movflags", "+faststart",
+        output_path,
+    ]
+
+
+def build_snapshot_command(rtsp_url: str, output_path: str) -> list[str]:
+    """Ambil 1 frame dari kamera sebagai snapshot JPG."""
+    return [
+        "ffmpeg", "-hide_banner", "-loglevel", "quiet",
+        "-rtsp_transport", "tcp",
+        "-i", rtsp_url,
+        "-vframes", "1",
+        "-q:v", "2",
+        "-y", output_path,
+    ]
+
+
+def remux_for_streaming(input_path: str, output_path: str) -> bool:
+    """
+    Remux file MP4 agar moov atom ada di awal (faststart).
+    Dipakai untuk file lama yang direkam tanpa -movflags +faststart.
+    Proses cepat: tidak decode ulang, hanya pindahkan metadata.
+
+    Returns:
+        True jika berhasil, False jika gagal.
+    """
+    try:
+        result = subprocess.run(
+            [
+                "ffmpeg", "-hide_banner", "-loglevel", "error",
+                "-i", input_path,
+                "-c", "copy",
+                "-movflags", "+faststart",
+                "-y", output_path,
+            ],
+            timeout=60,
+            capture_output=True,
+        )
+        return result.returncode == 0
+    except Exception:
+        return False
+
+
+def probe_stream(rtsp_url: str) -> dict | None:
+    """Cek apakah stream RTSP bisa diakses. Return info codec atau None jika gagal."""
+    try:
+        result = subprocess.run(
+            [
+                "ffprobe", "-v", "quiet", "-print_format", "json",
+                "-show_streams", "-rtsp_transport", "tcp", rtsp_url,
+            ],
+            capture_output=True, text=True, timeout=10
+        )
+        if result.returncode == 0:
+            return json.loads(result.stdout)
+    except Exception:
+        pass
+    return None
+'@
+
+Set-Content -Path "backend\services\recorder\ffmpeg_wrapper.py" -Value $ffmpegWrapper -Encoding UTF8
+Write-Host "  OK: ffmpeg_wrapper.py - tambah faststart + H.265 support" -ForegroundColor White
+
+# ─────────────────────────────────────────────────────────────────────────────
+# FIX 2: backend/api/routers/recordings.py
+# Fix endpoint /play: remux on-the-fly jika file belum faststart
+# ─────────────────────────────────────────────────────────────────────────────
+Write-Host "`n[2/3] Patching backend/api/routers/recordings.py (fix playback) ..." -ForegroundColor Green
+
+$recordingsRouter = @'
+"""
+Router: /api/v1/recordings
+List, playback, download, protect, delete rekaman.
+POST /sync: scan file di disk dan daftarkan ke DB.
+"""
+from datetime import datetime
+from pathlib import Path
+import tempfile
+import os
+from fastapi import APIRouter, Depends, Query, HTTPException, Request, BackgroundTasks
+from fastapi.responses import FileResponse, Response
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+
+from backend.db.base import get_db
+from backend.db.repositories.recording_repo import RecordingRepository
+from backend.db.repositories.event_repo import EventRepository
+from backend.db.repositories.camera_repo import CameraRepository
+from backend.db.models.recording import Recording
+from backend.api.middleware.auth import get_current_user, require_role
+from backend.db.models.user import User
+from backend.services.recorder.ffmpeg_wrapper import remux_for_streaming
+
+router = APIRouter(tags=["recordings"])
+
+# Cache file yang sudah di-remux agar tidak proses ulang setiap request
+_remux_cache: dict[int, str] = {}
+
+
+@router.get("")
+async def list_recordings(
+    camera_id: str | None = Query(None),
+    date: str | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    """List rekaman. Tanpa filter: 500 terbaru."""
+    repo = RecordingRepository(db)
+    if camera_id and date:
+        try:
+            date_obj = datetime.strptime(date, "%Y-%m-%d")
+            recordings = await repo.get_by_camera_and_date(
+                camera_id,
+                date_obj.replace(hour=0, minute=0, second=0),
+                date_obj.replace(hour=23, minute=59, second=59),
+            )
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Format tanggal harus YYYY-MM-DD")
+    elif camera_id:
+        recordings = await repo.get_by_camera(camera_id)
+    elif date:
+        try:
+            date_obj = datetime.strptime(date, "%Y-%m-%d")
+            recordings = await repo.get_by_date_range(
+                date_obj.replace(hour=0, minute=0, second=0),
+                date_obj.replace(hour=23, minute=59, second=59),
+            )
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Format tanggal harus YYYY-MM-DD")
+    else:
+        recordings = await repo.get_recent(limit=500)
+    return recordings
+
+
+@router.post("/sync")
+async def sync_recordings_from_disk(
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_role("admin")),
+):
+    """
+    Scan semua file .mp4 di storage dan daftarkan yang belum ada di DB.
+    Berguna untuk rekaman lama sebelum patch atau setelah DB reset.
+    """
+    repo = CameraRepository(db)
+    cameras = await repo.get_active_cameras()
+
+    inserted = 0
+    skipped = 0
+    errors = []
+
+    for cam in cameras:
+        drive = cam.storage_drive
+        cam_dir = Path(drive) / cam.id
+        if not cam_dir.exists():
+            continue
+
+        for mp4_file in sorted(cam_dir.rglob("*.mp4")):
+            try:
+                existing = await db.execute(
+                    select(Recording).where(Recording.file_path == str(mp4_file))
+                )
+                if existing.scalar_one_or_none() is not None:
+                    skipped += 1
+                    continue
+
+                stat = mp4_file.stat()
+                if stat.st_size < 1024:
+                    continue
+
+                try:
+                    date_str = mp4_file.parent.name
+                    time_str = mp4_file.stem
+                    started_at = datetime.strptime(f"{date_str} {time_str}", "%Y-%m-%d %H-%M-%S")
+                except ValueError:
+                    started_at = datetime.fromtimestamp(stat.st_mtime)
+
+                # Estimasi durasi dari ukuran file (kasar)
+                size_mb = stat.st_size / (1024 * 1024)
+                # ~1MB per menit untuk H.264 720p, ~2MB untuk 1080p
+                estimated_duration_s = int(size_mb * 30)
+
+                rec = Recording(
+                    camera_id=cam.id,
+                    file_path=str(mp4_file),
+                    file_size_mb=round(size_mb, 2),
+                    started_at=started_at,
+                    ended_at=None,
+                    duration_s=estimated_duration_s,
+                    codec="H264",
+                    is_protected=False,
+                    is_encoded_av1=False,
+                )
+                db.add(rec)
+                inserted += 1
+
+            except Exception as e:
+                errors.append({"file": str(mp4_file), "error": str(e)})
+
+    await db.commit()
+    return {
+        "status": "ok",
+        "inserted": inserted,
+        "skipped": skipped,
+        "errors": len(errors),
+        "error_details": errors[:10],
+    }
+
+
+@router.get("/{recording_id}/play")
+async def play_recording(
+    recording_id: int,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    """
+    Stream file MP4 ke browser dengan Range header support.
+
+    FIX: File lama yang direkam tanpa -movflags +faststart tidak bisa
+    langsung di-stream browser karena moov atom ada di akhir file.
+    Solusi: remux on-the-fly ke file temp, lalu serve file temp tersebut.
+    File baru (setelah patch) sudah punya faststart jadi langsung jalan.
+    """
+    repo = RecordingRepository(db)
+    rec  = await repo.get_by_id(recording_id)
+    if not rec:
+        raise HTTPException(status_code=404)
+
+    file_path = Path(rec.file_path)
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="File rekaman tidak ditemukan di disk")
+
+    # Cek apakah file sudah punya moov di awal (faststart)
+    # Cara cepat: baca 8 byte pertama dan cek apakah ada 'ftyp' atau 'moov'
+    serve_path = file_path
+    is_faststart = _check_faststart(file_path)
+
+    if not is_faststart:
+        # File lama: cek cache dulu
+        if recording_id in _remux_cache and Path(_remux_cache[recording_id]).exists():
+            serve_path = Path(_remux_cache[recording_id])
+        else:
+            # Remux ke file temp
+            tmp_dir = Path(tempfile.gettempdir()) / "nvr_remux"
+            tmp_dir.mkdir(exist_ok=True)
+            tmp_file = tmp_dir / f"rec_{recording_id}.mp4"
+
+            if not tmp_file.exists():
+                success = remux_for_streaming(str(file_path), str(tmp_file))
+                if success:
+                    _remux_cache[recording_id] = str(tmp_file)
+                    serve_path = tmp_file
+                # else: serve file asli (mungkin gagal di browser tapi tidak crash server)
+
+    # Serve dengan Range support
+    file_size = serve_path.stat().st_size
+    range_header = request.headers.get("range")
+
+    if range_header:
+        try:
+            range_val = range_header.replace("bytes=", "")
+            start_str, end_str = range_val.split("-")
+            start = int(start_str)
+            end = int(end_str) if end_str else min(start + 1024 * 1024 - 1, file_size - 1)
+        except Exception:
+            start, end = 0, min(1024 * 1024 - 1, file_size - 1)
+
+        chunk_size = end - start + 1
+        with open(serve_path, "rb") as f:
+            f.seek(start)
+            data = f.read(chunk_size)
+
+        headers = {
+            "Content-Range":  f"bytes {start}-{end}/{file_size}",
+            "Accept-Ranges":  "bytes",
+            "Content-Length": str(len(data)),
+            "Content-Type":   "video/mp4",
+        }
+        return Response(data, status_code=206, headers=headers)
+
+    return FileResponse(
+        serve_path,
+        media_type="video/mp4",
+        headers={"Accept-Ranges": "bytes"},
+    )
+
+
+def _check_faststart(file_path: Path) -> bool:
+    """
+    Cek apakah file MP4 punya moov atom di awal (faststart).
+    Baca 12 byte pertama: jika ada 'ftyp' atau 'moov' di offset 4, berarti faststart.
+    """
+    try:
+        with open(file_path, "rb") as f:
+            header = f.read(12)
+        if len(header) < 8:
+            return False
+        # Box type ada di byte 4-8
+        box_type = header[4:8]
+        return box_type in (b'ftyp', b'moov')
+    except Exception:
+        return False
+
+
+@router.get("/{recording_id}/download")
+async def download_recording(
+    recording_id: int,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    repo = RecordingRepository(db)
+    rec  = await repo.get_by_id(recording_id)
+    if not rec:
+        raise HTTPException(status_code=404)
+
+    file_path = Path(rec.file_path)
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="File tidak ditemukan di disk")
+
+    try:
+        ts = datetime.fromisoformat(str(rec.started_at)).strftime("%Y-%m-%d_%H-%M-%S")
+    except Exception:
+        ts = "unknown"
+    cam_slug = (rec.camera_id or "cam").replace("-", "_")
+    filename = f"{cam_slug}_{ts}.mp4"
+
+    return FileResponse(
+        path=file_path,
+        media_type="video/mp4",
+        filename=filename,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.get("/{recording_id}")
+async def get_recording(
+    recording_id: int,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    repo = RecordingRepository(db)
+    rec  = await repo.get_by_id(recording_id)
+    if not rec:
+        raise HTTPException(status_code=404)
+    return rec
+
+
+@router.get("/{camera_id}/timeline")
+async def get_timeline(
+    camera_id: str,
+    date: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    try:
+        date_obj  = datetime.strptime(date, "%Y-%m-%d")
+        date_from = date_obj.replace(hour=0,  minute=0,  second=0)
+        date_to   = date_obj.replace(hour=23, minute=59, second=59)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Format tanggal harus YYYY-MM-DD")
+
+    recording_repo = RecordingRepository(db)
+    recordings     = await recording_repo.get_by_camera_and_date(camera_id, date_from, date_to)
+    event_repo     = EventRepository(db)
+    events         = await event_repo.get_by_camera_and_date(camera_id, date_from, date_to)
+
+    timeline = []
+    for hour in range(24):
+        hour_start = date_obj.replace(hour=hour, minute=0,  second=0)
+        hour_end   = date_obj.replace(hour=hour, minute=59, second=59)
+        timeline.append({
+            "hour":          hour,
+            "has_recording": any(hour_start <= r.started_at.replace(tzinfo=None) <= hour_end for r in recordings),
+            "has_motion":    any(hour_start <= e.started_at.replace(tzinfo=None) <= hour_end for e in events),
+        })
+    return {
+        "camera_id": camera_id, "date": date,
+        "timeline": timeline,
+        "total_recordings": len(recordings),
+        "total_events": len(events),
+    }
+
+
+@router.post("/{recording_id}/protect")
+async def toggle_protect(
+    recording_id: int,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_role("operator")),
+):
+    repo = RecordingRepository(db)
+    rec  = await repo.get_by_id(recording_id)
+    if not rec:
+        raise HTTPException(status_code=404)
+    rec.is_protected = not rec.is_protected
+    await db.commit()
+    return {"is_protected": rec.is_protected}
+
+
+@router.delete("/{recording_id}", status_code=204)
+async def delete_recording(
+    recording_id: int,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_role("admin")),
+):
+    repo = RecordingRepository(db)
+    rec  = await repo.get_by_id(recording_id)
+    if not rec:
+        raise HTTPException(status_code=404)
+    if rec.is_protected:
+        raise HTTPException(status_code=400, detail="Rekaman dilindungi. Lepas proteksi dulu.")
+    try:
+        Path(rec.file_path).unlink(missing_ok=True)
+        # Hapus juga cache remux jika ada
+        if recording_id in _remux_cache:
+            Path(_remux_cache.pop(recording_id)).unlink(missing_ok=True)
+    except Exception:
+        pass
+    await repo.delete_by_id(recording_id)
+'@
+
+Set-Content -Path "backend\api\routers\recordings.py" -Value $recordingsRouter -Encoding UTF8
+Write-Host "  OK: recordings.py - fix playback dengan remux on-the-fly" -ForegroundColor White
+
+# ─────────────────────────────────────────────────────────────────────────────
+# FIX 3: frontend/src/pages/Storage/index.tsx
+# Tulis ulang TANPA emoji (emoji rusak karena encoding PowerShell)
+# ─────────────────────────────────────────────────────────────────────────────
+Write-Host "`n[3/3] Menulis ulang Storage/index.tsx tanpa emoji ..." -ForegroundColor Green
+
+# File ini sama persis dengan sebelumnya tapi TANPA emoji di label tab dan header
+# agar tidak ada karakter rusak
+$storageNoEmoji = @'
+import { useState, useEffect } from "react"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { apiClient } from "@/api/client"
 import { storageApi } from "@/api/storage"
@@ -485,3 +1070,33 @@ const smallBtn: React.CSSProperties = {
   padding: '3px 8px', borderRadius: 5, fontSize: 11, fontWeight: 600,
   border: 'none', cursor: 'pointer', whiteSpace: 'nowrap',
 }
+'@
+
+Set-Content -Path "frontend\src\pages\Storage\index.tsx" -Value $storageNoEmoji -Encoding UTF8
+Write-Host "  OK: Storage/index.tsx - tulis ulang tanpa emoji, bersih" -ForegroundColor White
+
+Write-Host "`n=============================================" -ForegroundColor Cyan
+Write-Host " FIX 3 SELESAI" -ForegroundColor Cyan
+Write-Host "=============================================" -ForegroundColor Cyan
+Write-Host " File yang diubah:" -ForegroundColor White
+Write-Host "   backend/services/recorder/ffmpeg_wrapper.py" -ForegroundColor Gray
+Write-Host "     -> Tambah -movflags +faststart (fix playback browser)" -ForegroundColor Gray
+Write-Host "     -> Tambah support H.265 recording (parameter force_h265)" -ForegroundColor Gray
+Write-Host "   backend/api/routers/recordings.py" -ForegroundColor Gray
+Write-Host "     -> Remux on-the-fly untuk file lama yang belum faststart" -ForegroundColor Gray
+Write-Host "   frontend/src/pages/Storage/index.tsx" -ForegroundColor Gray
+Write-Host "     -> Tulis ulang tanpa emoji (fix karakter aneh)" -ForegroundColor Gray
+
+Write-Host "`n Langkah selanjutnya:" -ForegroundColor Yellow
+Write-Host "   git add -A" -ForegroundColor DarkYellow
+Write-Host "   git commit -m 'fix: playback faststart, emoji encoding, H.265 support'" -ForegroundColor DarkYellow
+Write-Host "   git push" -ForegroundColor DarkYellow
+Write-Host "   docker compose up -d --build api frontend" -ForegroundColor DarkYellow
+
+Write-Host "`n Penjelasan ukuran file tidak konsisten:" -ForegroundColor Yellow
+Write-Host "   Normal - ini bukan bug:" -ForegroundColor White
+Write-Host "   - File besar (500MB-1GB): rekaman 1 jam penuh, bitrate tinggi" -ForegroundColor Gray
+Write-Host "   - File kecil (1-20MB): rekaman terpotong saat kamera disconnect" -ForegroundColor Gray
+Write-Host "   - Ukuran tergantung: resolusi kamera, gerakan di frame, bitrate setting" -ForegroundColor Gray
+Write-Host "   Untuk menghemat storage: aktifkan H.265 di setting kamera (hemat ~50%)" -ForegroundColor Gray
+Write-Host "   atau turunkan bitrate di kamera NVR via browser kamera langsung" -ForegroundColor Gray

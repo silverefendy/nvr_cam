@@ -1,12 +1,14 @@
 ﻿"""
 Router: /api/v1/recordings
 List, playback, download, protect, delete rekaman.
-Tambah: POST /sync â€” scan file di disk dan daftarkan ke DB.
+POST /sync: scan file di disk dan daftarkan ke DB.
 """
 from datetime import datetime
 from pathlib import Path
-from fastapi import APIRouter, Depends, Query, HTTPException, Request
-from fastapi.responses import FileResponse
+import tempfile
+import os
+from fastapi import APIRouter, Depends, Query, HTTPException, Request, BackgroundTasks
+from fastapi.responses import FileResponse, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
@@ -17,8 +19,12 @@ from backend.db.repositories.camera_repo import CameraRepository
 from backend.db.models.recording import Recording
 from backend.api.middleware.auth import get_current_user, require_role
 from backend.db.models.user import User
+from backend.services.recorder.ffmpeg_wrapper import remux_for_streaming
 
 router = APIRouter(tags=["recordings"])
+
+# Cache file yang sudah di-remux agar tidak proses ulang setiap request
+_remux_cache: dict[int, str] = {}
 
 
 @router.get("")
@@ -28,46 +34,42 @@ async def list_recordings(
     db: AsyncSession = Depends(get_db),
     _: User = Depends(get_current_user),
 ):
-    """List rekaman dengan filter opsional.
-    Tanpa filter â†’ kembalikan 500 rekaman terbaru.
-    """
+    """List rekaman. Tanpa filter: 500 terbaru."""
     repo = RecordingRepository(db)
     if camera_id and date:
         try:
             date_obj = datetime.strptime(date, "%Y-%m-%d")
-            date_from = date_obj.replace(hour=0, minute=0, second=0)
-            date_to   = date_obj.replace(hour=23, minute=59, second=59)
-            recordings = await repo.get_by_camera_and_date(camera_id, date_from, date_to)
+            recordings = await repo.get_by_camera_and_date(
+                camera_id,
+                date_obj.replace(hour=0, minute=0, second=0),
+                date_obj.replace(hour=23, minute=59, second=59),
+            )
         except ValueError:
-            raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD")
+            raise HTTPException(status_code=400, detail="Format tanggal harus YYYY-MM-DD")
     elif camera_id:
         recordings = await repo.get_by_camera(camera_id)
     elif date:
         try:
             date_obj = datetime.strptime(date, "%Y-%m-%d")
-            date_from = date_obj.replace(hour=0, minute=0, second=0)
-            date_to   = date_obj.replace(hour=23, minute=59, second=59)
-            recordings = await repo.get_by_date_range(date_from, date_to)
+            recordings = await repo.get_by_date_range(
+                date_obj.replace(hour=0, minute=0, second=0),
+                date_obj.replace(hour=23, minute=59, second=59),
+            )
         except ValueError:
-            raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD")
+            raise HTTPException(status_code=400, detail="Format tanggal harus YYYY-MM-DD")
     else:
-        # Kembalikan 500 rekaman terbaru tanpa filter
         recordings = await repo.get_recent(limit=500)
     return recordings
 
 
 @router.post("/sync")
 async def sync_recordings_from_disk(
-    request: Request,
     db: AsyncSession = Depends(get_db),
     _: User = Depends(require_role("admin")),
 ):
-    """Scan semua file .mp4 di storage dan daftarkan yang belum ada di DB.
-
-    Berguna untuk:
-    - Rekaman lama sebelum patch yang belum tercatat di DB
-    - Recovery setelah DB reset
-    - File yang ada di disk tapi hilang dari tabel recordings
+    """
+    Scan semua file .mp4 di storage dan daftarkan yang belum ada di DB.
+    Berguna untuk rekaman lama sebelum patch atau setelah DB reset.
     """
     repo = CameraRepository(db)
     cameras = await repo.get_active_cameras()
@@ -82,10 +84,8 @@ async def sync_recordings_from_disk(
         if not cam_dir.exists():
             continue
 
-        # Scan semua file .mp4 rekursif (struktur: <drive>/<cam_id>/<date>/<time>.mp4)
         for mp4_file in sorted(cam_dir.rglob("*.mp4")):
             try:
-                # Cek apakah sudah ada di DB
                 existing = await db.execute(
                     select(Recording).where(Recording.file_path == str(mp4_file))
                 )
@@ -94,25 +94,28 @@ async def sync_recordings_from_disk(
                     continue
 
                 stat = mp4_file.stat()
-                if stat.st_size < 1024:  # Skip file kosong
+                if stat.st_size < 1024:
                     continue
 
-                # Coba parse waktu dari nama file (format: %H-%M-%S.mp4)
                 try:
-                    date_str = mp4_file.parent.name  # YYYY-MM-DD
-                    time_str = mp4_file.stem           # HH-MM-SS
+                    date_str = mp4_file.parent.name
+                    time_str = mp4_file.stem
                     started_at = datetime.strptime(f"{date_str} {time_str}", "%Y-%m-%d %H-%M-%S")
                 except ValueError:
-                    # Fallback: gunakan mtime file
                     started_at = datetime.fromtimestamp(stat.st_mtime)
+
+                # Estimasi durasi dari ukuran file (kasar)
+                size_mb = stat.st_size / (1024 * 1024)
+                # ~1MB per menit untuk H.264 720p, ~2MB untuk 1080p
+                estimated_duration_s = int(size_mb * 30)
 
                 rec = Recording(
                     camera_id=cam.id,
                     file_path=str(mp4_file),
-                    file_size_mb=round(stat.st_size / (1024 * 1024), 2),
+                    file_size_mb=round(size_mb, 2),
                     started_at=started_at,
                     ended_at=None,
-                    duration_s=None,
+                    duration_s=estimated_duration_s,
                     codec="H264",
                     is_protected=False,
                     is_encoded_av1=False,
@@ -124,14 +127,140 @@ async def sync_recordings_from_disk(
                 errors.append({"file": str(mp4_file), "error": str(e)})
 
     await db.commit()
-
     return {
         "status": "ok",
         "inserted": inserted,
         "skipped": skipped,
         "errors": len(errors),
-        "error_details": errors[:10],  # Max 10 error ditampilkan
+        "error_details": errors[:10],
     }
+
+
+@router.get("/{recording_id}/play")
+async def play_recording(
+    recording_id: int,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    """
+    Stream file MP4 ke browser dengan Range header support.
+
+    FIX: File lama yang direkam tanpa -movflags +faststart tidak bisa
+    langsung di-stream browser karena moov atom ada di akhir file.
+    Solusi: remux on-the-fly ke file temp, lalu serve file temp tersebut.
+    File baru (setelah patch) sudah punya faststart jadi langsung jalan.
+    """
+    repo = RecordingRepository(db)
+    rec  = await repo.get_by_id(recording_id)
+    if not rec:
+        raise HTTPException(status_code=404)
+
+    file_path = Path(rec.file_path)
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="File rekaman tidak ditemukan di disk")
+
+    # Cek apakah file sudah punya moov di awal (faststart)
+    # Cara cepat: baca 8 byte pertama dan cek apakah ada 'ftyp' atau 'moov'
+    serve_path = file_path
+    is_faststart = _check_faststart(file_path)
+
+    if not is_faststart:
+        # File lama: cek cache dulu
+        if recording_id in _remux_cache and Path(_remux_cache[recording_id]).exists():
+            serve_path = Path(_remux_cache[recording_id])
+        else:
+            # Remux ke file temp
+            tmp_dir = Path(tempfile.gettempdir()) / "nvr_remux"
+            tmp_dir.mkdir(exist_ok=True)
+            tmp_file = tmp_dir / f"rec_{recording_id}.mp4"
+
+            if not tmp_file.exists():
+                success = remux_for_streaming(str(file_path), str(tmp_file))
+                if success:
+                    _remux_cache[recording_id] = str(tmp_file)
+                    serve_path = tmp_file
+                # else: serve file asli (mungkin gagal di browser tapi tidak crash server)
+
+    # Serve dengan Range support
+    file_size = serve_path.stat().st_size
+    range_header = request.headers.get("range")
+
+    if range_header:
+        try:
+            range_val = range_header.replace("bytes=", "")
+            start_str, end_str = range_val.split("-")
+            start = int(start_str)
+            end = int(end_str) if end_str else min(start + 1024 * 1024 - 1, file_size - 1)
+        except Exception:
+            start, end = 0, min(1024 * 1024 - 1, file_size - 1)
+
+        chunk_size = end - start + 1
+        with open(serve_path, "rb") as f:
+            f.seek(start)
+            data = f.read(chunk_size)
+
+        headers = {
+            "Content-Range":  f"bytes {start}-{end}/{file_size}",
+            "Accept-Ranges":  "bytes",
+            "Content-Length": str(len(data)),
+            "Content-Type":   "video/mp4",
+        }
+        return Response(data, status_code=206, headers=headers)
+
+    return FileResponse(
+        serve_path,
+        media_type="video/mp4",
+        headers={"Accept-Ranges": "bytes"},
+    )
+
+
+def _check_faststart(file_path: Path) -> bool:
+    """
+    Cek apakah file MP4 punya moov atom di awal (faststart).
+    Baca 12 byte pertama: jika ada 'ftyp' atau 'moov' di offset 4, berarti faststart.
+    """
+    try:
+        with open(file_path, "rb") as f:
+            header = f.read(12)
+        if len(header) < 8:
+            return False
+        # Box type ada di byte 4-8
+        box_type = header[4:8]
+        return box_type in (b'ftyp', b'moov')
+    except Exception:
+        return False
+
+
+@router.get("/{recording_id}/download")
+async def download_recording(
+    recording_id: int,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    repo = RecordingRepository(db)
+    rec  = await repo.get_by_id(recording_id)
+    if not rec:
+        raise HTTPException(status_code=404)
+
+    file_path = Path(rec.file_path)
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="File tidak ditemukan di disk")
+
+    try:
+        ts = datetime.fromisoformat(str(rec.started_at)).strftime("%Y-%m-%d_%H-%M-%S")
+    except Exception:
+        ts = "unknown"
+    cam_slug = (rec.camera_id or "cam").replace("-", "_")
+    filename = f"{cam_slug}_{ts}.mp4"
+
+    return FileResponse(
+        path=file_path,
+        media_type="video/mp4",
+        filename=filename,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.get("/{recording_id}")
@@ -147,80 +276,6 @@ async def get_recording(
     return rec
 
 
-@router.get("/{recording_id}/play")
-async def play_recording(
-    recording_id: int,
-    request: Request,
-    db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_user),
-):
-    """Stream file video untuk playback di browser dengan Range header support."""
-    repo = RecordingRepository(db)
-    rec  = await repo.get_by_id(recording_id)
-    if not rec:
-        raise HTTPException(status_code=404)
-    file_path = Path(rec.file_path)
-    if not file_path.exists():
-        raise HTTPException(status_code=404, detail="File rekaman tidak ada di disk")
-
-    range_header = request.headers.get("range")
-    if range_header:
-        try:
-            start, end = range_header.replace("bytes=", "").split("-")
-            start = int(start)
-            file_size = file_path.stat().st_size
-            end = int(end) if end else file_size - 1
-        except Exception:
-            start, end = 0, file_path.stat().st_size - 1
-            file_size  = file_path.stat().st_size
-
-        chunk_size = 1024 * 1024
-        with open(file_path, "rb") as f:
-            f.seek(start)
-            data = f.read(min(end - start + 1, chunk_size))
-
-        from fastapi.responses import Response
-        headers = {
-            "Content-Range":  f"bytes {start}-{end}/{file_size}",
-            "Accept-Ranges":  "bytes",
-            "Content-Length": str(len(data)),
-            "Content-Type":   "video/mp4",
-        }
-        return Response(data, status_code=206, headers=headers)
-
-    return FileResponse(file_path, media_type="video/mp4", filename=file_path.name)
-
-
-@router.get("/{recording_id}/download")
-async def download_recording(
-    recording_id: int,
-    db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_user),
-):
-    repo = RecordingRepository(db)
-    rec  = await repo.get_by_id(recording_id)
-    if not rec:
-        raise HTTPException(status_code=404, detail="Rekaman tidak ditemukan")
-
-    file_path = Path(rec.file_path)
-    if not file_path.exists():
-        raise HTTPException(status_code=404, detail="File rekaman tidak ada di disk")
-
-    try:
-        ts = datetime.fromisoformat(str(rec.started_at)).strftime("%Y-%m-%d_%H-%M-%S")
-    except Exception:
-        ts = "unknown"
-    cam_slug = (rec.camera_id or "cam").replace("-", "_")
-    download_name = f"{cam_slug}_{ts}.mp4"
-
-    return FileResponse(
-        path=file_path,
-        media_type="video/mp4",
-        filename=download_name,
-        headers={"Content-Disposition": f'attachment; filename="{download_name}"'},
-    )
-
-
 @router.get("/{camera_id}/timeline")
 async def get_timeline(
     camera_id: str,
@@ -233,7 +288,7 @@ async def get_timeline(
         date_from = date_obj.replace(hour=0,  minute=0,  second=0)
         date_to   = date_obj.replace(hour=23, minute=59, second=59)
     except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD")
+        raise HTTPException(status_code=400, detail="Format tanggal harus YYYY-MM-DD")
 
     recording_repo = RecordingRepository(db)
     recordings     = await recording_repo.get_by_camera_and_date(camera_id, date_from, date_to)
@@ -246,16 +301,14 @@ async def get_timeline(
         hour_end   = date_obj.replace(hour=hour, minute=59, second=59)
         timeline.append({
             "hour":          hour,
-            "has_recording": any(hour_start <= rec.started_at.replace(tzinfo=None) <= hour_end for rec in recordings),
-            "has_motion":    any(hour_start <= evt.started_at.replace(tzinfo=None) <= hour_end for evt in events),
+            "has_recording": any(hour_start <= r.started_at.replace(tzinfo=None) <= hour_end for r in recordings),
+            "has_motion":    any(hour_start <= e.started_at.replace(tzinfo=None) <= hour_end for e in events),
         })
-
     return {
-        "camera_id":        camera_id,
-        "date":             date,
-        "timeline":         timeline,
+        "camera_id": camera_id, "date": date,
+        "timeline": timeline,
         "total_recordings": len(recordings),
-        "total_events":     len(events),
+        "total_events": len(events),
     }
 
 
@@ -285,6 +338,12 @@ async def delete_recording(
     if not rec:
         raise HTTPException(status_code=404)
     if rec.is_protected:
-        raise HTTPException(status_code=400, detail="Rekaman dilindungi, lepas proteksi dulu")
-    Path(rec.file_path).unlink(missing_ok=True)
+        raise HTTPException(status_code=400, detail="Rekaman dilindungi. Lepas proteksi dulu.")
+    try:
+        Path(rec.file_path).unlink(missing_ok=True)
+        # Hapus juga cache remux jika ada
+        if recording_id in _remux_cache:
+            Path(_remux_cache.pop(recording_id)).unlink(missing_ok=True)
+    except Exception:
+        pass
     await repo.delete_by_id(recording_id)
