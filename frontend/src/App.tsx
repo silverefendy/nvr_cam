@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useAuthStore } from "@/store/auth"
+import { ThemeProvider, useTheme } from "@/store/theme"
 import { Sidebar } from "@/components/layout/Sidebar"
 import LoginPage    from "@/pages/Login"
 import LiveViewPage from "@/pages/LiveView"
@@ -26,23 +27,27 @@ const queryClient = new QueryClient({
 
 function ProtectedLayout() {
   const { isAuthenticated } = useAuthStore()
+  const { isDark } = useTheme()
   if (!isAuthenticated) return <Navigate to="/login" replace />
 
   return (
-    /*
-      Pakai 100dvh (dynamic viewport height) bukan h-screen (100vh).
-      100dvh lebih akurat di mobile dan browser modern.
-      overflow:hidden di sini agar tidak ada scroll di level ini.
-      Semua scroll harus terjadi di dalam komponen masing-masing.
-    */
-    <div style={{ display: 'flex', width: '100vw', height: '100dvh', overflow: 'hidden', background: '#0f1117' }}>
+    <div style={{
+      display: 'flex',
+      width: '100vw',
+      height: '100dvh',
+      overflow: 'hidden',
+      background: isDark ? '#0f1117' : '#f1f5f9',
+    }}>
       <Sidebar />
-      {/*
-        main: flex:1 agar mengisi sisa lebar, height:100% agar mengisi
-        tinggi parent (100dvh), overflow:hidden agar tidak ada scroll di sini.
-        min-width:0 penting agar flex child tidak overflow horizontal.
-      */}
-      <main style={{ flex: 1, height: '100%', overflow: 'hidden', minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+      <main style={{
+        flex: 1,
+        height: '100%',
+        overflow: 'hidden',
+        minWidth: 0,
+        display: 'flex',
+        flexDirection: 'column',
+        background: isDark ? '#0f1117' : '#f1f5f9',
+      }}>
         <Routes>
           <Route path="/live"     element={<LiveViewPage />} />
           <Route path="/playback" element={<PlaybackPage />} />
@@ -62,13 +67,15 @@ function ProtectedLayout() {
 
 export default function App() {
   return (
-    <QueryClientProvider client={queryClient}>
-      <BrowserRouter>
-        <Routes>
-          <Route path="/login" element={<LoginPage />} />
-          <Route path="/*"     element={<ProtectedLayout />} />
-        </Routes>
-      </BrowserRouter>
-    </QueryClientProvider>
+    <ThemeProvider>
+      <QueryClientProvider client={queryClient}>
+        <BrowserRouter>
+          <Routes>
+            <Route path="/login" element={<LoginPage />} />
+            <Route path="/*"     element={<ProtectedLayout />} />
+          </Routes>
+        </BrowserRouter>
+      </QueryClientProvider>
+    </ThemeProvider>
   )
 }
