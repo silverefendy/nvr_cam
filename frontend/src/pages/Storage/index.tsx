@@ -1,10 +1,30 @@
 import { useState, useEffect } from "react"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { storageApi } from "@/api/storage"
+import { recordingsApi } from "@/api/recordings"
+import { camerasApi } from "@/api/cameras"
 import { useAuthStore } from "@/store/auth"
-import type { DriveStatus } from "@/types"
+import { useTheme } from "@/store/theme"
+import type { DriveStatus, Recording } from "@/types"
 
-type Tab = "drives" | "cameras" | "schedule"
+type Tab = "drives" | "recordings" | "cameras" | "schedule"
+
+// ── Helpers ────────────────────────────────────────────────────────────────────
+const formatGB  = (gb: number) => gb >= 1000 ? `${(gb / 1024).toFixed(2)} TB` : `${gb.toFixed(1)} GB`
+const formatMB  = (mb: number) => mb >= 1024  ? `${(mb / 1024).toFixed(2)} GB` : `${mb.toFixed(0)} MB`
+const formatDur = (s?: number) => {
+  if (!s) return '-'
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = Math.floor(s % 60)
+  return h > 0 ? `${h}j ${m}m` : m > 0 ? `${m}m ${sec}s` : `${sec}s`
+}
+const formatDate = (iso: string) => {
+  const d = new Date(iso)
+  return d.toLocaleString('id-ID', { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' })
+}
+const todayStr = () => new Date().toISOString().slice(0, 10)
+const weekAgoStr = () => {
+  const d = new Date(); d.setDate(d.getDate() - 7); return d.toISOString().slice(0, 10)
+}
 
 export default function StoragePage() {
   const [activeTab, setActiveTab]       = useState<Tab>("drives")
@@ -12,26 +32,49 @@ export default function StoragePage() {
   const [schedMinute, setSchedMinute]   = useState(0)
   const [schedEnabled, setSchedEnabled] = useState(false)
   const [message, setMessage]           = useState<{ type: "success" | "error"; text: string } | null>(null)
+  const [recCameraId, setRecCameraId]   = useState<string>("")
+  const [recDateFrom, setRecDateFrom]   = useState(weekAgoStr())
+  const [recDateTo, setRecDateTo]       = useState(todayStr())
+  const [playingId, setPlayingId]       = useState<number | null>(null)
+
   const queryClient = useQueryClient()
   const { isAuthenticated } = useAuthStore()
+  const { isDark } = useTheme()
 
+  // ── Theme tokens ──────────────────────────────────────────────────────────
+  const bg      = isDark ? '#0f1117' : '#f1f5f9'
+  const card    = isDark ? '#1a1d27' : '#ffffff'
+  const cardB   = isDark ? '#2a2d3a' : '#e2e8f0'
+  const text    = isDark ? '#e2e8f0' : '#1e293b'
+  const sub     = isDark ? '#64748b' : '#94a3b8'
+  const inputBg = isDark ? '#12151f' : '#f8fafc'
+  const rowHov  = isDark ? '#1e2130' : '#f8fafc'
+
+  // ── Queries ───────────────────────────────────────────────────────────────
   const { data: storage, isLoading, refetch } = useQuery({
-    queryKey:        ["storage"],
-    queryFn:         storageApi.getStatus,
-    enabled:         isAuthenticated,
-    refetchInterval: 30000,
+    queryKey: ["storage"], queryFn: storageApi.getStatus,
+    enabled: isAuthenticated, refetchInterval: 30000,
   })
-
   const { data: cameraStats, isLoading: statsLoading } = useQuery({
-    queryKey: ["storage-camera-stats"],
-    queryFn:  storageApi.getStatsByCamera,
-    enabled:  isAuthenticated && activeTab === "cameras",
+    queryKey: ["storage-camera-stats"], queryFn: storageApi.getStatsByCamera,
+    enabled: isAuthenticated && activeTab === "cameras",
   })
-
   const { data: schedule } = useQuery({
-    queryKey: ["cleanup-schedule"],
-    queryFn:  storageApi.getCleanupSchedule,
-    enabled:  isAuthenticated && activeTab === "schedule",
+    queryKey: ["cleanup-schedule"], queryFn: storageApi.getCleanupSchedule,
+    enabled: isAuthenticated && activeTab === "schedule",
+  })
+  const { data: cameras } = useQuery({
+    queryKey: ["cameras"], queryFn: camerasApi.list,
+    enabled: isAuthenticated,
+  })
+  const { data: recordings, isLoading: recLoading } = useQuery({
+    queryKey: ["recordings", recCameraId, recDateFrom, recDateTo],
+    queryFn: () => recordingsApi.list({
+      camera_id: recCameraId || undefined,
+      date_from: recDateFrom || undefined,
+      date_to:   recDateTo   || undefined,
+    }),
+    enabled: isAuthenticated && activeTab === "recordings",
   })
 
   useEffect(() => {
@@ -44,252 +87,442 @@ export default function StoragePage() {
 
   const showMsg = (type: "success" | "error", text: string) => {
     setMessage({ type, text })
-    setTimeout(() => setMessage(null), 3000)
+    setTimeout(() => setMessage(null), 3500)
   }
 
   const cleanupMutation = useMutation({
     mutationFn: storageApi.manualCleanup,
-    onSuccess:  () => { refetch(); showMsg("success", "Cleanup selesai dijalankan") },
-    onError:    () => showMsg("error", "Cleanup gagal"),
+    onSuccess: () => { refetch(); showMsg("success", "Cleanup selesai") },
+    onError:   () => showMsg("error", "Cleanup gagal"),
   })
-
   const scheduleMutation = useMutation({
     mutationFn: storageApi.saveCleanupSchedule,
-    onSuccess:  () => {
-      queryClient.invalidateQueries({ queryKey: ["cleanup-schedule"] })
-      showMsg("success", "Jadwal cleanup disimpan")
-    },
-    onError: () => showMsg("error", "Gagal menyimpan jadwal"),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["cleanup-schedule"] }); showMsg("success", "Jadwal disimpan") },
+    onError:   () => showMsg("error", "Gagal menyimpan jadwal"),
+  })
+  const protectMutation = useMutation({
+    mutationFn: (id: number) => recordingsApi.protect(id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["recordings"] }),
+  })
+  const deleteMutation = useMutation({
+    mutationFn: (id: number) => recordingsApi.delete(id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["recordings"] }),
   })
 
-  const handleCleanup = () => {
-    if (confirm("Jalankan cleanup sekarang? File terlama yang tidak diprotect akan dihapus.")) {
-      cleanupMutation.mutate()
-    }
-  }
+  const getUsageColor = (p: number) => p < 10 ? '#ef4444' : p < 25 ? '#f59e0b' : '#10b981'
+  const getUsedPct    = (d: DriveStatus) => Math.round((d.used_gb / d.total_gb) * 100)
 
-  const getUsageColor = (p: number) => p < 10 ? "text-red-600" : p < 25 ? "text-amber-500" : "text-emerald-600"
-  const getBarColor   = (p: number) => p < 10 ? "bg-red-500"  : p < 25 ? "bg-amber-400"  : "bg-emerald-500"
-  const formatGB = (gb: number) => gb >= 1000 ? `${(gb / 1024).toFixed(1)} TB` : `${gb.toFixed(0)} GB`
-  const formatMB = (mb: number) => mb >= 1024  ? `${(mb / 1024).toFixed(2)} GB` : `${mb.toFixed(0)} MB`
-
-  const tabs: { id: Tab; label: string }[] = [
-    { id: "drives",   label: "Drive" },
-    { id: "cameras",  label: "Per Kamera" },
-    { id: "schedule", label: "Jadwal Cleanup" },
+  const tabs: { id: Tab; label: string; icon: string }[] = [
+    { id: "drives",     label: "Drive",           icon: "💾" },
+    { id: "recordings", label: "Rekaman",          icon: "🎞️" },
+    { id: "cameras",    label: "Per Kamera",       icon: "📷" },
+    { id: "schedule",   label: "Jadwal Cleanup",   icon: "🕐" },
   ]
 
-  return (
-    <div className="flex flex-col h-full p-4 gap-4 bg-slate-100">
+  // ── Card style helper ─────────────────────────────────────────────────────
+  const cardStyle: React.CSSProperties = {
+    background: card, border: `1px solid ${cardB}`,
+    borderRadius: 12, padding: '16px',
+    boxShadow: isDark ? '0 2px 8px rgba(0,0,0,0.3)' : '0 1px 4px rgba(0,0,0,0.06)',
+  }
 
-      {/* Header */}
-      <div className="flex items-center gap-4 bg-white border border-slate-200 rounded-xl px-4 py-3 shadow-sm flex-shrink-0">
-        <h1 className="text-sm font-semibold text-slate-700">Storage</h1>
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: bg, padding: 16, gap: 12, overflow: 'hidden' }}>
+
+      {/* ── Header ──────────────────────────────────────────────────────── */}
+      <div style={{ ...cardStyle, padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}>
+        <span style={{ fontSize: 16 }}>💾</span>
+        <h1 style={{ fontSize: 15, fontWeight: 700, color: text, margin: 0 }}>Storage</h1>
+
+        {/* Summary pill kalau data ada */}
+        {storage && (
+          <div style={{ display: 'flex', gap: 12, marginLeft: 8, flexWrap: 'wrap' }}>
+            {[
+              { label: 'Total', value: `${storage.total_tb} TB`, color: text },
+              { label: 'Dipakai', value: `${storage.used_tb} TB`, color: '#f59e0b' },
+              { label: 'Sisa', value: `${storage.free_tb} TB`, color: storage.free_tb < 1 ? '#ef4444' : '#10b981' },
+              { label: 'Estimasi habis', value: `~${storage.estimated_days_remaining} hari`, color: sub },
+            ].map(s => (
+              <div key={s.label} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                <span style={{ fontSize: 11, color: sub }}>{s.label}</span>
+                <span style={{ fontSize: 13, fontWeight: 700, color: s.color }}>{s.value}</span>
+              </div>
+            ))}
+          </div>
+        )}
+
         {message && (
-          <span className={`text-xs font-medium px-3 py-1 rounded-full ${
-            message.type === "success"
-              ? "bg-emerald-100 text-emerald-700"
-              : "bg-red-100 text-red-700"
-          }`}>
-            {message.text}
+          <span style={{
+            marginLeft: 'auto',
+            fontSize: 12, padding: '4px 12px', borderRadius: 99, fontWeight: 600,
+            background: message.type === 'success' ? (isDark ? '#052e16' : '#dcfce7') : (isDark ? '#2d0a0a' : '#fee2e2'),
+            color: message.type === 'success' ? '#10b981' : '#ef4444',
+            border: `1px solid ${message.type === 'success' ? '#10b98140' : '#ef444440'}`,
+          }}>
+            {message.type === 'success' ? '✓' : '✗'} {message.text}
           </span>
         )}
+
         <button
-          onClick={handleCleanup}
+          onClick={() => { if (confirm('Jalankan cleanup sekarang?')) cleanupMutation.mutate() }}
           disabled={cleanupMutation.isPending}
-          className="ml-auto px-3 py-1.5 bg-red-500 hover:bg-red-600 disabled:bg-slate-300 rounded-lg text-white text-xs font-medium transition-colors"
+          style={{
+            marginLeft: message ? 8 : 'auto',
+            padding: '7px 14px', borderRadius: 8, fontSize: 12, fontWeight: 600,
+            background: cleanupMutation.isPending ? sub : '#ef4444',
+            color: '#fff', border: 'none', cursor: 'pointer',
+          }}
         >
-          {cleanupMutation.isPending ? "Cleaning..." : "Cleanup Sekarang"}
+          {cleanupMutation.isPending ? 'Membersihkan...' : '🗑️ Cleanup'}
         </button>
       </div>
 
-      {/* Tabs */}
-      <div className="flex gap-1 flex-shrink-0 bg-white border border-slate-200 rounded-xl p-1 shadow-sm w-fit">
+      {/* ── Tabs ────────────────────────────────────────────────────────── */}
+      <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
         {tabs.map(t => (
           <button
             key={t.id}
             onClick={() => setActiveTab(t.id)}
-            className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-              activeTab === t.id
-                ? "bg-sky-600 text-white shadow-sm"
-                : "text-slate-500 hover:text-slate-700 hover:bg-slate-100"
-            }`}
+            style={{
+              padding: '8px 16px', borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: 'pointer',
+              border: `1px solid ${activeTab === t.id ? '#0284c7' : cardB}`,
+              background: activeTab === t.id ? '#0284c7' : card,
+              color: activeTab === t.id ? '#fff' : sub,
+              transition: 'all 0.15s',
+              display: 'flex', alignItems: 'center', gap: 6,
+            }}
           >
-            {t.label}
+            <span>{t.icon}</span> {t.label}
           </button>
         ))}
       </div>
 
-      {/* Content */}
-      <div className="flex-1 overflow-auto">
+      {/* ── Content area ────────────────────────────────────────────────── */}
+      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
 
-        {/* Tab: Drive */}
-        {activeTab === "drives" && (
-          isLoading ? (
-            <div className="flex items-center justify-center h-40 text-slate-400 text-sm">Memuat data storage...</div>
-          ) : !storage?.drives?.length ? (
-            <div className="flex items-center justify-center h-40 text-slate-400 text-sm">Tidak ada drive terkonfigurasi</div>
-          ) : (
-            <div className="grid gap-4">
-              {/* Summary Bar */}
-              <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm flex flex-wrap gap-6 text-sm">
-                <div>
-                  <p className="text-xs text-slate-400 mb-0.5">Total</p>
-                  <p className="font-semibold text-slate-700">{storage.total_tb} TB</p>
-                </div>
-                <div>
-                  <p className="text-xs text-slate-400 mb-0.5">Dipakai</p>
-                  <p className="font-semibold text-slate-700">{storage.used_tb} TB</p>
-                </div>
-                <div>
-                  <p className="text-xs text-slate-400 mb-0.5">Sisa</p>
-                  <p className={`font-semibold ${storage.free_tb < 1 ? "text-red-600" : "text-emerald-600"}`}>
-                    {storage.free_tb} TB
-                  </p>
-                </div>
-                <div>
-                  <p className="text-xs text-slate-400 mb-0.5">Estimasi habis</p>
-                  <p className="font-semibold text-slate-700">~{storage.estimated_days_remaining} hari</p>
-                </div>
-              </div>
+        {/* ── Tab: Drive ──────────────────────────────────────────────── */}
+        {activeTab === 'drives' && (
+          isLoading
+            ? <div style={{ color: sub, padding: 40, textAlign: 'center' }}>Memuat data storage...</div>
+            : !storage?.drives?.length
+              ? <div style={{ color: sub, padding: 40, textAlign: 'center' }}>Tidak ada drive terkonfigurasi</div>
+              : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  {storage.drives.map((drive: DriveStatus) => {
+                    const usedPct = getUsedPct(drive)
+                    const freePct = drive.free_pct
+                    const barColor = getUsageColor(freePct)
+                    return (
+                      <div key={drive.path} style={cardStyle}>
+                        {/* Header drive */}
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
+                          <div>
+                            <div style={{ fontSize: 14, fontWeight: 700, color: text, display: 'flex', alignItems: 'center', gap: 8 }}>
+                              <span>💾</span> {drive.path}
+                              {freePct < (storage.threshold_pct ?? 10) && (
+                                <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 99, background: '#7f1d1d', color: '#fca5a5', fontWeight: 700 }}>
+                                  ⚠️ Kritis
+                                </span>
+                              )}
+                            </div>
+                            <div style={{ fontSize: 11, color: sub, marginTop: 3 }}>
+                              {drive.cameras?.length ?? 0} kamera terdaftar
+                              {drive.cameras?.length > 0 && ` · ${drive.cameras.join(', ')}`}
+                            </div>
+                          </div>
+                          <div style={{ textAlign: 'right' }}>
+                            <div style={{ fontSize: 22, fontWeight: 800, color: barColor, lineHeight: 1 }}>
+                              {freePct.toFixed(1)}%
+                            </div>
+                            <div style={{ fontSize: 11, color: sub }}>sisa tersedia</div>
+                          </div>
+                        </div>
 
-              {/* Drive Cards */}
-              {storage.drives.map((drive: DriveStatus) => (
-                <div key={drive.path} className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
-                  <div className="flex items-start justify-between mb-3">
-                    <div>
-                      <h3 className="font-semibold text-slate-700">{drive.path}</h3>
-                      <p className="text-xs text-slate-400 mt-0.5">
-                        {drive.cameras?.length ?? 0} kamera terdaftar
-                      </p>
-                    </div>
-                    <div className="text-right">
-                      <p className={`text-lg font-bold ${getUsageColor(drive.free_pct)}`}>
-                        {drive.free_pct.toFixed(1)}% sisa
-                      </p>
-                      <p className="text-xs text-slate-400">{formatGB(drive.free_gb)} dari {formatGB(drive.total_gb)}</p>
-                    </div>
-                  </div>
-                  <div className="w-full bg-slate-100 rounded-full h-2.5 mb-3">
-                    <div
-                      className={`h-2.5 rounded-full transition-all ${getBarColor(drive.free_pct)}`}
-                      style={{ width: `${drive.free_pct}%` }}
-                    />
-                  </div>
-                  <div className="flex items-center gap-3 text-xs text-slate-400">
-                    <span>Dipakai: {formatGB(drive.used_gb)}</span>
-                    <span>·</span>
-                    <span>Threshold: {storage.threshold_pct ?? 10}%</span>
-                    {drive.free_pct < (storage.threshold_pct ?? 10) && (
-                      <span className="ml-1 px-2 py-0.5 bg-red-100 text-red-600 rounded-full font-medium">
-                        Di bawah threshold!
-                      </span>
-                    )}
-                  </div>
+                        {/* Progress bar — menunjukkan PEMAKAIAN */}
+                        <div style={{ position: 'relative', height: 10, background: isDark ? '#1e2130' : '#e2e8f0', borderRadius: 99, overflow: 'hidden', marginBottom: 10 }}>
+                          <div style={{
+                            position: 'absolute', left: 0, top: 0, bottom: 0,
+                            width: `${usedPct}%`,
+                            background: usedPct > 90 ? '#ef4444' : usedPct > 75 ? '#f59e0b' : '#0284c7',
+                            borderRadius: 99,
+                            transition: 'width 0.5s ease',
+                          }} />
+                        </div>
+
+                        {/* Stats row */}
+                        <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap' }}>
+                          {[
+                            { label: 'Total',    value: formatGB(drive.total_gb), color: text },
+                            { label: 'Dipakai',  value: formatGB(drive.used_gb),  color: '#f59e0b' },
+                            { label: 'Sisa',     value: formatGB(drive.free_gb),  color: '#10b981' },
+                            { label: 'Threshold', value: `${storage.threshold_pct ?? 10}%`, color: sub },
+                          ].map(s => (
+                            <div key={s.label}>
+                              <div style={{ fontSize: 10, color: sub, marginBottom: 2 }}>{s.label}</div>
+                              <div style={{ fontSize: 14, fontWeight: 700, color: s.color }}>{s.value}</div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )
+                  })}
                 </div>
-              ))}
-            </div>
-          )
+              )
         )}
 
-        {/* Tab: Per Kamera */}
-        {activeTab === "cameras" && (
-          statsLoading ? (
-            <div className="flex items-center justify-center h-40 text-slate-400 text-sm">Memuat statistik...</div>
-          ) : !cameraStats?.length ? (
-            <div className="flex items-center justify-center h-40 text-slate-400 text-sm">Tidak ada data kamera</div>
-          ) : (
-            <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
-              <div className="px-4 py-3 border-b border-slate-100">
-                <p className="text-xs text-slate-400">{cameraStats.length} kamera · diurutkan dari penggunaan disk terbesar</p>
-              </div>
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="text-left text-xs text-slate-400 bg-slate-50 border-b border-slate-100">
-                    <th className="px-4 py-2">#</th>
-                    <th className="px-4 py-2">Kamera</th>
-                    <th className="px-4 py-2">Drive</th>
-                    <th className="px-4 py-2 text-right">File</th>
-                    <th className="px-4 py-2 text-right">Ukuran</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {cameraStats.map((s: any, i: number) => (
-                    <tr key={s.camera_id} className="border-b border-slate-50 hover:bg-slate-50 transition-colors">
-                      <td className="px-4 py-2.5 text-slate-400 text-xs">{i + 1}</td>
-                      <td className="px-4 py-2.5 font-medium text-slate-700">{s.camera_id}</td>
-                      <td className="px-4 py-2.5 text-slate-400 text-xs">{s.drive}</td>
-                      <td className="px-4 py-2.5 text-right text-slate-600">{s.file_count}</td>
-                      <td className="px-4 py-2.5 text-right">
-                        <span className={i < 3 ? "text-amber-600 font-semibold" : "text-slate-600"}>
-                          {formatMB(s.total_mb)}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )
-        )}
+        {/* ── Tab: Rekaman ────────────────────────────────────────────── */}
+        {activeTab === 'recordings' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
 
-        {/* Tab: Jadwal Cleanup */}
-        {activeTab === "schedule" && (
-          <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm max-w-md space-y-6">
-            <div>
-              <h2 className="text-base font-semibold text-slate-700 mb-1">Jadwal Cleanup Otomatis</h2>
-              <p className="text-xs text-slate-400">
-                Cleanup terjadwal menghapus file terlama sesuai waktu yang ditentukan,
-                meski disk belum kritis — agar ruang selalu tersedia.
-              </p>
-            </div>
-
-            <div className="flex items-center gap-3">
-              <span className="text-sm text-slate-600">Aktifkan cleanup terjadwal</span>
-              <button
-                onClick={() => setSchedEnabled(!schedEnabled)}
-                className={`relative w-10 h-5 rounded-full transition-colors ${schedEnabled ? "bg-sky-500" : "bg-slate-300"}`}
+            {/* Filter bar */}
+            <div style={{ ...cardStyle, padding: '12px 16px', display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 12, fontWeight: 600, color: sub }}>Filter:</span>
+              <select
+                value={recCameraId}
+                onChange={e => setRecCameraId(e.target.value)}
+                style={{ padding: '6px 10px', borderRadius: 7, fontSize: 12, border: `1px solid ${cardB}`, background: inputBg, color: text, cursor: 'pointer' }}
               >
-                <span className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${schedEnabled ? "translate-x-5" : "translate-x-0.5"}`} />
-              </button>
+                <option value="">Semua Kamera</option>
+                {cameras?.map((c: any) => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ fontSize: 11, color: sub }}>Dari</span>
+                <input type="date" value={recDateFrom} onChange={e => setRecDateFrom(e.target.value)}
+                  style={{ padding: '6px 8px', borderRadius: 7, fontSize: 12, border: `1px solid ${cardB}`, background: inputBg, color: text }} />
+                <span style={{ fontSize: 11, color: sub }}>s/d</span>
+                <input type="date" value={recDateTo} onChange={e => setRecDateTo(e.target.value)}
+                  style={{ padding: '6px 8px', borderRadius: 7, fontSize: 12, border: `1px solid ${cardB}`, background: inputBg, color: text }} />
+              </div>
+              <span style={{ fontSize: 11, color: sub, marginLeft: 'auto' }}>
+                {recordings ? `${recordings.length} rekaman ditemukan` : ''}
+              </span>
             </div>
 
-            <div className={`space-y-4 ${!schedEnabled ? "opacity-40 pointer-events-none" : ""}`}>
-              <div>
-                <label className="block text-sm text-slate-600 mb-2 font-medium">Jam cleanup (HH : MM)</label>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="number" min={0} max={23} value={schedHour}
-                    onChange={e => setSchedHour(Number(e.target.value))}
-                    className="w-20 bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-slate-700 text-center focus:outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
+            {/* Video player kalau sedang diputar */}
+            {playingId !== null && (() => {
+              const rec = recordings?.find((r: Recording) => r.id === playingId)
+              return rec ? (
+                <div style={cardStyle}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                    <span style={{ fontSize: 13, fontWeight: 600, color: text }}>
+                      🎞️ {rec.camera_id} · {formatDate(rec.started_at)}
+                    </span>
+                    <button onClick={() => setPlayingId(null)}
+                      style={{ fontSize: 12, padding: '3px 10px', borderRadius: 6, border: `1px solid ${cardB}`, background: 'transparent', color: sub, cursor: 'pointer' }}>
+                      ✕ Tutup
+                    </button>
+                  </div>
+                  <video
+                    src={recordingsApi.playUrl(rec.id)}
+                    controls autoPlay
+                    style={{ width: '100%', maxHeight: 400, background: '#000', borderRadius: 8 }}
                   />
-                  <span className="text-slate-400 font-bold">:</span>
-                  <input
-                    type="number" min={0} max={59} value={schedMinute}
-                    onChange={e => setSchedMinute(Number(e.target.value))}
-                    className="w-20 bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-slate-700 text-center focus:outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
-                  />
-                  <span className="text-xs text-slate-400">
-                    cron: {String(schedMinute).padStart(2,'0')} {String(schedHour).padStart(2,'0')} * * *
-                  </span>
                 </div>
-                <p className="text-xs text-slate-400 mt-1">Disarankan jam 03:00 saat beban rendah</p>
+              ) : null
+            })()}
+
+            {/* List rekaman */}
+            {recLoading ? (
+              <div style={{ color: sub, padding: 40, textAlign: 'center' }}>Memuat rekaman...</div>
+            ) : !recordings?.length ? (
+              <div style={{ ...cardStyle, padding: 40, textAlign: 'center', color: sub }}>
+                <div style={{ fontSize: 32, marginBottom: 8 }}>🎞️</div>
+                <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 4 }}>Tidak ada rekaman ditemukan</div>
+                <div style={{ fontSize: 12 }}>Coba ubah filter kamera atau rentang tanggal</div>
               </div>
+            ) : (
+              <div style={{ ...cardStyle, padding: 0, overflow: 'hidden' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                  <thead>
+                    <tr style={{ background: isDark ? '#12151f' : '#f8fafc', borderBottom: `1px solid ${cardB}` }}>
+                      {['Kamera', 'Mulai', 'Durasi', 'Ukuran', 'Codec', 'Aksi'].map(h => (
+                        <th key={h} style={{ padding: '10px 14px', textAlign: 'left', fontSize: 11, fontWeight: 700, color: sub, letterSpacing: '0.04em' }}>
+                          {h}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {recordings.map((rec: Recording, i: number) => (
+                      <tr
+                        key={rec.id}
+                        style={{
+                          borderBottom: `1px solid ${isDark ? '#1e2130' : '#f1f5f9'}`,
+                          background: playingId === rec.id ? (isDark ? '#1a2a3a' : '#eff6ff') : 'transparent',
+                          transition: 'background 0.1s',
+                          cursor: 'pointer',
+                        }}
+                        onMouseEnter={e => (e.currentTarget.style.background = playingId === rec.id ? (isDark ? '#1a2a3a' : '#eff6ff') : rowHov)}
+                        onMouseLeave={e => (e.currentTarget.style.background = playingId === rec.id ? (isDark ? '#1a2a3a' : '#eff6ff') : 'transparent')}
+                        onClick={() => setPlayingId(rec.id === playingId ? null : rec.id)}
+                      >
+                        <td style={{ padding: '10px 14px', fontWeight: 600, color: text }}>
+                          {rec.camera_id}
+                          {rec.is_protected && <span style={{ marginLeft: 6, fontSize: 9, padding: '1px 5px', borderRadius: 99, background: isDark ? '#1e3a5f' : '#dbeafe', color: '#3b82f6' }}>🔒 Protected</span>}
+                        </td>
+                        <td style={{ padding: '10px 14px', color: sub, fontSize: 12 }}>{formatDate(rec.started_at)}</td>
+                        <td style={{ padding: '10px 14px', color: sub }}>{formatDur(rec.duration_s)}</td>
+                        <td style={{ padding: '10px 14px', color: sub }}>{rec.file_size_mb ? formatMB(rec.file_size_mb) : '-'}</td>
+                        <td style={{ padding: '10px 14px' }}>
+                          <span style={{
+                            fontSize: 10, padding: '2px 7px', borderRadius: 99, fontWeight: 700,
+                            background: rec.codec === 'H265' ? (isDark ? '#1e2d1e' : '#dcfce7') : (isDark ? '#1e2130' : '#f1f5f9'),
+                            color: rec.codec === 'H265' ? '#10b981' : sub,
+                          }}>{rec.codec}</span>
+                        </td>
+                        <td style={{ padding: '10px 14px' }}>
+                          <div style={{ display: 'flex', gap: 6 }} onClick={e => e.stopPropagation()}>
+                            <button
+                              onClick={() => setPlayingId(rec.id === playingId ? null : rec.id)}
+                              title="Putar rekaman"
+                              style={{ ...smallBtn, background: isDark ? '#1a2a3a' : '#dbeafe', color: '#3b82f6' }}
+                            >▶ Putar</button>
+                            <a
+                              href={recordingsApi.downloadUrl(rec.id)}
+                              download
+                              style={{ ...smallBtn, background: isDark ? '#1a2a1a' : '#dcfce7', color: '#10b981', textDecoration: 'none' }}
+                            >⬇ Unduh</a>
+                            <button
+                              onClick={() => protectMutation.mutate(rec.id)}
+                              title={rec.is_protected ? 'Hapus proteksi' : 'Proteksi rekaman'}
+                              style={{ ...smallBtn, background: isDark ? '#1a1a2a' : '#ede9fe', color: '#8b5cf6' }}
+                            >{rec.is_protected ? '🔓' : '🔒'}</button>
+                            {!rec.is_protected && (
+                              <button
+                                onClick={() => { if (confirm(`Hapus rekaman ${rec.camera_id}?`)) deleteMutation.mutate(rec.id) }}
+                                style={{ ...smallBtn, background: isDark ? '#2d0a0a' : '#fee2e2', color: '#ef4444' }}
+                              >🗑️</button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── Tab: Per Kamera ─────────────────────────────────────────── */}
+        {activeTab === 'cameras' && (
+          statsLoading
+            ? <div style={{ color: sub, padding: 40, textAlign: 'center' }}>Memuat statistik...</div>
+            : !cameraStats?.length
+              ? <div style={{ color: sub, padding: 40, textAlign: 'center' }}>Tidak ada data kamera</div>
+              : (
+                <div style={{ ...cardStyle, padding: 0, overflow: 'hidden' }}>
+                  <div style={{ padding: '10px 16px', borderBottom: `1px solid ${cardB}`, fontSize: 11, color: sub }}>
+                    {cameraStats.length} kamera · diurutkan dari penggunaan terbesar
+                  </div>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                    <thead>
+                      <tr style={{ background: isDark ? '#12151f' : '#f8fafc', borderBottom: `1px solid ${cardB}` }}>
+                        {['#', 'Kamera', 'Drive', 'File', 'Total'].map(h => (
+                          <th key={h} style={{ padding: '10px 14px', textAlign: h === 'File' || h === 'Total' ? 'right' : 'left', fontSize: 11, fontWeight: 700, color: sub }}>
+                            {h}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {cameraStats.map((s: any, i: number) => (
+                        <tr key={s.camera_id} style={{ borderBottom: `1px solid ${isDark ? '#1e2130' : '#f1f5f9'}` }}
+                          onMouseEnter={e => (e.currentTarget.style.background = rowHov)}
+                          onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+                        >
+                          <td style={{ padding: '10px 14px', color: sub, fontSize: 11 }}>{i + 1}</td>
+                          <td style={{ padding: '10px 14px', fontWeight: 600, color: text }}>{s.camera_id}</td>
+                          <td style={{ padding: '10px 14px', color: sub, fontSize: 12 }}>{s.drive}</td>
+                          <td style={{ padding: '10px 14px', textAlign: 'right', color: sub }}>{s.file_count.toLocaleString()}</td>
+                          <td style={{ padding: '10px 14px', textAlign: 'right', fontWeight: 700, color: i < 3 ? '#f59e0b' : text }}>
+                            {formatMB(s.total_mb)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )
+        )}
+
+        {/* ── Tab: Jadwal Cleanup ─────────────────────────────────────── */}
+        {activeTab === 'schedule' && (
+          <div style={{ ...cardStyle, maxWidth: 500 }}>
+            <h2 style={{ fontSize: 15, fontWeight: 700, color: text, margin: '0 0 6px' }}>Jadwal Cleanup Otomatis</h2>
+            <p style={{ fontSize: 12, color: sub, margin: '0 0 20px', lineHeight: 1.6 }}>
+              Cleanup terjadwal menghapus file terlama yang tidak diproteksi secara otomatis agar ruang disk selalu tersedia.
+            </p>
+
+            {/* Toggle */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20 }}>
+              <span style={{ fontSize: 13, color: text }}>Aktifkan cleanup terjadwal</span>
+              <div
+                onClick={() => setSchedEnabled(!schedEnabled)}
+                style={{
+                  width: 44, height: 24, borderRadius: 99, cursor: 'pointer', position: 'relative',
+                  background: schedEnabled ? '#0284c7' : (isDark ? '#2a2d3a' : '#cbd5e1'),
+                  transition: 'background 0.2s',
+                  flexShrink: 0,
+                }}
+              >
+                <div style={{
+                  position: 'absolute', top: 2, width: 20, height: 20, borderRadius: '50%',
+                  background: '#fff', boxShadow: '0 1px 4px rgba(0,0,0,0.3)',
+                  left: schedEnabled ? 22 : 2,
+                  transition: 'left 0.2s',
+                }} />
+              </div>
+              <span style={{ fontSize: 11, color: schedEnabled ? '#10b981' : sub, fontWeight: 600 }}>
+                {schedEnabled ? 'Aktif' : 'Nonaktif'}
+              </span>
+            </div>
+
+            {/* Time input */}
+            <div style={{ opacity: schedEnabled ? 1 : 0.4, pointerEvents: schedEnabled ? 'auto' : 'none', marginBottom: 20 }}>
+              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: sub, marginBottom: 8 }}>
+                Jam cleanup (HH : MM)
+              </label>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <input
+                  type="number" min={0} max={23} value={schedHour}
+                  onChange={e => setSchedHour(Number(e.target.value))}
+                  style={{ width: 64, padding: '8px', borderRadius: 8, border: `1px solid ${cardB}`, background: inputBg, color: text, fontSize: 18, fontWeight: 700, textAlign: 'center' }}
+                />
+                <span style={{ fontSize: 20, fontWeight: 800, color: sub }}>:</span>
+                <input
+                  type="number" min={0} max={59} value={schedMinute}
+                  onChange={e => setSchedMinute(Number(e.target.value))}
+                  style={{ width: 64, padding: '8px', borderRadius: 8, border: `1px solid ${cardB}`, background: inputBg, color: text, fontSize: 18, fontWeight: 700, textAlign: 'center' }}
+                />
+                <span style={{ fontSize: 11, color: sub }}>
+                  cron: <code style={{ background: isDark ? '#12151f' : '#f1f5f9', padding: '2px 6px', borderRadius: 4 }}>
+                    {String(schedMinute).padStart(2,'0')} {String(schedHour).padStart(2,'0')} * * *
+                  </code>
+                </span>
+              </div>
+              <p style={{ fontSize: 11, color: sub, marginTop: 6 }}>💡 Disarankan jam 03:00 saat traffic rendah</p>
             </div>
 
             <button
               onClick={() => scheduleMutation.mutate({ enabled: schedEnabled, hour: schedHour, minute: schedMinute })}
               disabled={scheduleMutation.isPending}
-              className="px-4 py-2 bg-sky-600 hover:bg-sky-500 disabled:bg-slate-300 rounded-lg text-white text-sm font-medium transition-colors"
+              style={{
+                padding: '10px 20px', borderRadius: 8, fontSize: 13, fontWeight: 700,
+                background: '#0284c7', color: '#fff', border: 'none', cursor: 'pointer',
+                opacity: scheduleMutation.isPending ? 0.6 : 1,
+              }}
             >
-              {scheduleMutation.isPending ? "Menyimpan..." : "Simpan Jadwal"}
+              {scheduleMutation.isPending ? 'Menyimpan...' : '💾 Simpan Jadwal'}
             </button>
 
             {schedule && (
-              <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 text-xs text-slate-500 space-y-1">
-                <p>Status: <span className={schedule.enabled ? "text-emerald-600 font-medium" : "text-slate-400"}>{schedule.enabled ? "Aktif" : "Nonaktif"}</span></p>
-                <p>Cron: <code className="text-slate-600 bg-slate-100 px-1 rounded">{schedule.cron}</code></p>
-                <p className="text-amber-500 pt-1">Berlaku setelah backend di-restart.</p>
+              <div style={{ marginTop: 16, padding: 12, background: isDark ? '#12151f' : '#f8fafc', borderRadius: 8, border: `1px solid ${cardB}`, fontSize: 12, color: sub }}>
+                <div>Status: <span style={{ color: schedule.enabled ? '#10b981' : sub, fontWeight: 700 }}>{schedule.enabled ? 'Aktif' : 'Nonaktif'}</span></div>
+                <div style={{ marginTop: 4 }}>Cron: <code style={{ background: isDark ? '#1a1d27' : '#e2e8f0', padding: '1px 6px', borderRadius: 4, color: text }}>{schedule.cron}</code></div>
+                <div style={{ marginTop: 6, color: '#f59e0b' }}>⚠️ Berlaku setelah backend di-restart</div>
               </div>
             )}
           </div>
@@ -297,4 +530,9 @@ export default function StoragePage() {
       </div>
     </div>
   )
+}
+
+const smallBtn: React.CSSProperties = {
+  padding: '3px 8px', borderRadius: 5, fontSize: 11, fontWeight: 600,
+  border: 'none', cursor: 'pointer', whiteSpace: 'nowrap',
 }
