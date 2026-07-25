@@ -2,7 +2,7 @@
 ## Issue Tracker & Status Penyelesaian
 
 **Dibuat:** 22 Juli 2026  
-**Diperbarui:** 25 Juli 2026, 12:00 WIB (Sesi #012 — Adaptive Grid + Floating Window Mode)  
+**Diperbarui:** 25 Juli 2026, 17:10 WIB (Sesi #013 — Fix ganti IP kamera tidak apply)  
 **Repo:** https://github.com/silverefendy/nvr_cam
 
 > File ini mencatat semua issue/task yang sedang dikerjakan atau sudah selesai.  
@@ -20,6 +20,38 @@
 | ⏭️ | Ditunda / skip untuk sekarang |
 | ❌ | Dibatalkan |
 | ⚠️ | Perlu verifikasi lanjut |
+
+---
+
+## 🐛 Bug Fixes Sesi #013 — Fix Ganti IP Kamera Tidak Apply
+
+> **Tanggal:** 25 Juli 2026  
+> **Scope:** Edit kamera (ganti IP) tidak efektif setelah save — recorder tetap pakai konfigurasi lama
+
+### Bug Fixes
+
+| ID | Bug | Root Cause | Status |
+|----|-----|------------|--------|
+| BUG-043 | Ganti IP kamera tidak apply — recorder tetap streaming dari IP lama setelah edit & save | Dua root cause: (1) `restart_camera()` tidak ada locking → beberapa PUT berturut-turut (save 3 kamera) trigger restart concurrent untuk kamera yang sama; recorder baru start sebelum yang lama mati → konflik HLS segment → error `Invalid data found`. (2) File HLS lama (*.ts + index.m3u8) tidak dibersihkan saat restart → FFmpeg baru baca manifest stale yang referensikan segment dari RTSP sebelumnya. | ✅ Fixed |
+
+**Fix detail (BUG-043):**
+- `manager.py`: tambah `_restart_locks: dict[str, asyncio.Lock]` — per-camera lock agar `restart_camera` tidak berjalan concurrent untuk kamera yang sama. Restart kedua menunggu yang pertama selesai, lalu pakai config terbaru dari DB.
+- `manager.py`: tambah `await asyncio.sleep(2)` setelah `stop()` — beri waktu FFmpeg lama release file handle sebelum recorder baru start.
+- `camera_recorder.py`: tambah `_clear_hls_files()` — hapus semua `*.ts` dan `*.m3u8` di direktori HLS sebelum FFmpeg baru dijalankan. Dipanggil di awal `_run_hls_loop()`.
+
+**Catatan:** Data di DB sudah benar sejak awal (RTSP URL sudah di-update saat PUT). Masalah murni di timing restart recorder, bukan di penyimpanan konfigurasi.
+
+### ⚠️ Perlu Dilakukan Setelah Pull
+
+```bash
+git pull && docker compose up --build -d api
+```
+
+Verifikasi:
+1. Edit kamera, ganti IP, klik Save
+2. Tunggu ~10 detik
+3. Cek log: `docker compose logs --tail 20 api` — harusnya ada `Restarted recording for camera cam_XX` sekali saja (bukan berkali-kali)
+4. Live view harusnya tampil dari IP baru tanpa error `Invalid data found`
 
 ---
 
@@ -49,17 +81,6 @@
 - Window baru dimulai dari posisi tile otomatis (4 kolom), tidak tumpuk
 - Toggle antara Grid Mode (⊞) dan Floating Mode (⧉) ada di toolbar
 - Grid selector (1x1, 2x2, dll) hanya muncul di Grid Mode
-
-### ⚠️ Perlu Dilakukan Setelah Push
-
-```bash
-git pull && docker compose up --build -d frontend
-```
-
-Verifikasi:
-1. **Grid Mode**: kamera mengisi seluruh tinggi layar tanpa ruang kosong di bawah
-2. **Grid Mode**: tombol 1x1 → 1 kamera besar penuh layar; 3x3 dengan 3 kamera → 3 kotak merata mengisi layar
-3. **Floating Mode**: kamera muncul sebagai window terpisah; bisa di-drag, di-resize, di-minimize
 
 ---
 
@@ -130,7 +151,7 @@ Verifikasi:
 | # | Item | Cara Verifikasi |
 |---|------|-----------------|
 | 1 | BUG-032: 403 di `/api/v1/config/system` | `SELECT username, role FROM users;` di DB |
-| 2 | Storage page tidak bisa tampil / rekam tidak jalan | Cek log: `docker compose logs -f api` saat buka halaman Storage |
+| 2 | BUG-043: ganti IP kamera apply dengan benar | `docker compose up --build -d api`, edit kamera, cek log |
 | 3 | Sesi #012 adaptive grid + floating mode | `docker compose up --build -d frontend` lalu tes kedua mode |
 
 ---
@@ -236,3 +257,4 @@ Verifikasi:
 | 8 | 24 Juli 2026 | #010 | Claude | Fix Docker runtime (BUG-028–037), UI redesign |
 | 9 | 25 Juli 2026 | #011 | Claude | Fix BUG-038–041, cleanup file repo |
 | 10 | 25 Juli 2026 | #012 | Claude | Fix BUG-042 (adaptive grid), fitur C-14 (Floating Mode) |
+| 11 | 25 Juli 2026 | #013 | Claude | Fix BUG-043 (ganti IP kamera tidak apply — per-camera lock + clear HLS) |
