@@ -1,14 +1,1 @@
-﻿@tailwind base;
-@tailwind components;
-@tailwind utilities;
-
-body {
-  margin: 0;
-  font-family: system-ui, sans-serif;
-  background: #f1f5f9;
-  color: #1e293b;
-}
-
-* {
-  box-sizing: border-box;
-}
+QHRhaWx3aW5kIGJhc2U7CkB0YWlsd2luZCBjb21wb25lbnRzOwpAdGFpbHdpbmQgdXRpbGl0aWVzOwoKLyoKICBLRVkgRklYOiBodG1sLCBib2R5LCAjcm9vdCBoYXJ1cyBwdW55YSBoZWlnaHQ6IDEwMCUKICBhZ2FyIGNoYWluIHRpbmdnaSBkYXJpIGF0YXMga2UgYmF3YWggdGlkYWsgcHV0dXMuCiAgVGFucGEgaW5pLCBzZW11YSBgaGVpZ2h0OiAxMDAlYCBkaSBDb21wb25lbnQgdGlkYWsgcHVueWEKICByZWZlcmVuc2kgZGFuIGphdHVoIGtlIGhlaWdodDogYXV0byAodGluZ2dpIGtvbnRlbikuCiovCmh0bWwsCmJvZHksCiNyb290IHsKICBoZWlnaHQ6IDEwMCU7CiAgbWFyZ2luOiAwOwogIHBhZGRpbmc6IDA7Cn0KCmJvZHkgewogIGZvbnQtZmFtaWx5OiBzeXN0ZW0tdWksIHNhbnMtc2VyaWY7CiAgYmFja2dyb3VuZDogI2YxZjVmOTsKICBjb2xvcjogIzFlMjkzYjsKfQoKKiB7CiAgYm94LXNpemluZzogYm9yZGVyLWJveDsKfQo=
