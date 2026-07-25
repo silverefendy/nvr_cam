@@ -1,4 +1,4 @@
-﻿"""
+"""
 Router: /api/v1/recordings
 List, playback, download, protect, delete rekaman.
 POST /sync: scan file di disk dan daftarkan ke DB.
@@ -19,7 +19,7 @@ from backend.db.repositories.camera_repo import CameraRepository
 from backend.db.models.recording import Recording
 from backend.api.middleware.auth import get_current_user, require_role
 from backend.db.models.user import User
-from backend.services.recorder.ffmpeg_wrapper import remux_for_streaming
+from backend.services.recorder.ffmpeg_wrapper import remux_for_streaming, probe_codec_from_file, transcode_to_h264
 
 router = APIRouter(tags=["recordings"])
 

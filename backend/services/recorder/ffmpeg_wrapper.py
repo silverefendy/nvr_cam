@@ -1,4 +1,4 @@
-﻿"""
+"""
 FFmpeg wrapper - semua command FFmpeg ada di sini.
 
 Catatan penting tentang -movflags +faststart:
@@ -185,3 +185,61 @@ def probe_stream(rtsp_url: str) -> dict | None:
     except Exception:
         pass
     return None
+
+
+def probe_codec_from_file(file_path: str) -> str | None:
+    """
+    Probe codec video dari file lokal (bukan RTSP stream).
+    Dipakai saat playback untuk cek apakah file perlu di-transcode.
+
+    Returns:
+        Nama codec lowercase: 'h264', 'hevc', 'av1', dll — atau None jika gagal.
+    """
+    try:
+        result = subprocess.run(
+            [
+                "ffprobe", "-v", "quiet", "-print_format", "json",
+                "-show_streams", file_path,
+            ],
+            capture_output=True, text=True, timeout=10,
+        )
+        if result.returncode == 0:
+            info = json.loads(result.stdout)
+            for stream in info.get("streams", []):
+                if stream.get("codec_type") == "video":
+                    return stream.get("codec_name")  # 'h264', 'hevc', dll
+    except Exception:
+        pass
+    return None
+
+
+def transcode_to_h264(input_path: str, output_path: str) -> bool:
+    """
+    Transcode file HEVC/H.265 ke H.264 MP4 agar bisa diputar di browser
+    via HTML5 <video> tag (Chrome/Firefox tidak support HEVC natively).
+
+    Proses ini memakan waktu untuk file besar — hasilnya di-cache di tmp_dir
+    agar tidak perlu transcode ulang setiap request playback.
+
+    Returns:
+        True jika berhasil, False jika gagal.
+    """
+    try:
+        result = subprocess.run(
+            [
+                "ffmpeg", "-hide_banner", "-loglevel", "error",
+                "-i", input_path,
+                "-c:v", "libx264",
+                "-preset", "fast",   # fast = balance antara kecepatan dan ukuran
+                "-crf", "23",        # 23 = kualitas default ffmpeg, hasil bagus
+                "-c:a", "aac",
+                "-b:a", "64k",
+                "-movflags", "+faststart",  # wajib agar browser bisa stream
+                "-y", output_path,
+            ],
+            timeout=600,  # 10 menit max untuk file 644 MB
+            capture_output=True,
+        )
+        return result.returncode == 0
+    except Exception:
+        return False

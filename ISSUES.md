@@ -23,6 +23,43 @@
 
 ---
 
+## 🐛 Bug Fixes Sesi #014 — Fix Playback HEVC + Codec Detection
+
+> **Tanggal:** 26 Juli 2026
+> **Scope:** Playback rekaman gagal dengan error "No video with supported format and MIME type found"
+
+### Bug Fixes
+
+| ID | Bug | Root Cause | Status |
+|----|-----|------------|--------|
+| BUG-044 | Playback rekaman error "No video with supported format and MIME type found" | Dua kemungkinan: (1) File rekaman bercodec HEVC/H.265 — browser Chrome/Firefox tidak support HEVC di HTML5 `<video>` natively. (2) File lama tanpa `-movflags +faststart` (moov atom di akhir). Backend tidak mendeteksi codec aktual sebelum serve — langsung stream file mentah ke browser. | ✅ Fixed |
+| BUG-045 | Kolom `codec` di DB selalu isi "H264" meskipun kamera rekam HEVC | `_save_recording_to_db()` hardcode `codec="H264"` tanpa probe file aktual | ✅ Fixed |
+
+**Fix detail (BUG-044 + BUG-045):**
+- `ffmpeg_wrapper.py`: tambah `probe_codec_from_file()` — probe codec dari file lokal via ffprobe
+- `ffmpeg_wrapper.py`: tambah `transcode_to_h264()` — transcode HEVC ke H.264 MP4 dengan `-movflags +faststart`, cache hasil di `/tmp/nvr_remux/rec_{id}_h264.mp4`
+- `recordings.py` (`/play` endpoint): probe codec file dulu sebelum serve. Jika HEVC → transcode ke H.264 (cached). Jika H.264 → cek faststart, remux jika perlu (behaviour lama).
+- `camera_recorder.py` (`_save_recording_to_db`): ganti hardcode `"H264"` dengan probe aktual via `probe_codec_from_file()`, simpan `"H265"` atau `"H264"` sesuai isi file.
+
+**Catatan penting:**
+- Transcode HEVC → H.264 untuk file besar (600+ MB) memakan waktu **2–5 menit** pada request pertama. Request berikutnya langsung serve dari cache.
+- Cache di `/tmp/nvr_remux/` akan hilang saat container restart — transcode ulang di request pertama setelah restart.
+- Jika kamera memang kirim H.264 dan masalah hanya faststart, proses remux jauh lebih cepat (~10 detik).
+
+### ⚠️ Perlu Dilakukan Setelah Pull
+
+```bash
+git pull && docker compose up --build -d api
+```
+
+Verifikasi:
+1. Buka halaman Playback, pilih kamera + tanggal
+2. Klik ▶ Putar di salah satu rekaman
+3. Video harus bisa diputar (mungkin ada delay 2–5 menit untuk HEVC pertama kali)
+4. Cek log: `docker compose logs --tail 30 api` — cari baris `probe_codec` atau `transcode`
+
+---
+
 ## 🐛 Bug Fixes Sesi #013 — Fix Ganti IP Kamera Tidak Apply
 
 > **Tanggal:** 25 Juli 2026  
@@ -258,3 +295,4 @@ Verifikasi:
 | 9 | 25 Juli 2026 | #011 | Claude | Fix BUG-038–041, cleanup file repo |
 | 10 | 25 Juli 2026 | #012 | Claude | Fix BUG-042 (adaptive grid), fitur C-14 (Floating Mode) |
 | 11 | 25 Juli 2026 | #013 | Claude | Fix BUG-043 (ganti IP kamera tidak apply — per-camera lock + clear HLS) |
+| 12 | 26 Juli 2026 | #014 | Claude | Fix BUG-044 (playback HEVC error) + BUG-045 (codec hardcode H264) |
