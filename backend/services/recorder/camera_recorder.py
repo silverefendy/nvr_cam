@@ -17,7 +17,7 @@ import asyncio
 from pathlib import Path
 from datetime import datetime, timezone
 from backend.core.logging import get_logger
-from .ffmpeg_wrapper import build_record_command, build_hls_command, detect_video_codec, probe_codec_from_file
+from .ffmpeg_wrapper import build_record_command, build_hls_command, detect_video_codec, probe_codec_from_file, probe_codec_from_file
 
 logger = get_logger(__name__, service="recorder")
 

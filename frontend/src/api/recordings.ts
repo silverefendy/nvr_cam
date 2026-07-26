@@ -1,4 +1,4 @@
-﻿import { apiClient } from './client'
+import { apiClient } from './client'
 import type { Recording } from "@/types"
 
 export const recordingsApi = {
@@ -45,7 +45,14 @@ export const recordingsApi = {
   }),
 
   get:         (id: number) => apiClient.get<Recording>(`/recordings/${id}`).then(r => r.data),
-  playUrl:     (id: number) => `/api/v1/recordings/${id}/play`,
+  playUrl: (id: number): string => {
+    // HTML5 <video src="..."> tidak bisa kirim Authorization header otomatis.
+    // Token diambil dari localStorage (key: 'access_token' — set oleh useAuthStore).
+    // Kalau token tidak ada (belum login), URL tanpa token → backend akan 401.
+    const token = localStorage.getItem('access_token') ?? '';
+    const qs = token ? `?token=${encodeURIComponent(token)}` : '';
+    return `/api/v1/recordings/${id}/play${qs}`;
+  },
   downloadUrl: (id: number) => `/api/v1/recordings/${id}/download`,
   protect:     (id: number) => apiClient.post(`/recordings/${id}/protect`).then(r => r.data),
   delete:      (id: number) => apiClient.delete(`/recordings/${id}`),

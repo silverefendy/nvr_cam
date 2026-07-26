@@ -3,7 +3,7 @@ Auth dependency — dipakai di semua router yang butuh login.
 Penggunaan: tambahkan `current_user: User = Depends(require_auth)` di endpoint.
 """
 import uuid
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 import jwt
@@ -65,3 +65,51 @@ def require_role(minimum_role: str):
 require_auth     = Depends(get_current_user)
 require_admin    = Depends(require_role("admin"))
 require_operator = Depends(require_role("operator"))
+
+
+async def get_current_user_flexible(
+    request: Request,
+    token_query: str | None = None,
+    db: AsyncSession = Depends(get_db),
+) -> User:
+    """
+    Dependency khusus untuk endpoint video streaming.
+
+    HTML5 <video src="..."> tidak bisa kirim Authorization header otomatis.
+    Dependency ini cek header Authorization dulu, lalu fallback ke query
+    param ?token=... jika header tidak ada.
+
+    Urutan prioritas:
+      1. Header: Authorization: Bearer <token>
+      2. Query param: ?token=<token>
+    """
+    # Ambil token dari header dulu
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        token = auth_header[7:]
+    elif token_query:
+        token = token_query
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token tidak ditemukan — pastikan sudah login",
+        )
+
+    try:
+        payload = jwt.decode(token, settings.jwt_secret, algorithms=["HS256"])
+        user_id_str: str = payload.get("sub")
+        if not user_id_str:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
+        user_id = uuid.UUID(user_id_str)
+    except ValueError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid user ID in token")
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token expired")
+    except jwt.PyJWTError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
+
+    repo = UserRepository(db)
+    user = await repo.get_by_id(user_id)
+    if not user or not user.is_active:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
+    return user

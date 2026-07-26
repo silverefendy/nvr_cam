@@ -17,9 +17,9 @@ from backend.db.repositories.recording_repo import RecordingRepository
 from backend.db.repositories.event_repo import EventRepository
 from backend.db.repositories.camera_repo import CameraRepository
 from backend.db.models.recording import Recording
-from backend.api.middleware.auth import get_current_user, require_role
+from backend.api.middleware.auth import get_current_user, get_current_user_flexible, require_role
 from backend.db.models.user import User
-from backend.services.recorder.ffmpeg_wrapper import remux_for_streaming, probe_codec_from_file, transcode_to_h264
+from backend.services.recorder.ffmpeg_wrapper import remux_for_streaming, probe_codec_from_file, transcode_to_h264, probe_codec_from_file, transcode_to_h264
 
 router = APIRouter(tags=["recordings"])
 
@@ -142,7 +142,7 @@ async def play_recording(
     request: Request,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_user),
+    token: str | None = Query(None, alias="token"),
 ):
     """
     Stream file MP4 ke browser dengan Range header support.
