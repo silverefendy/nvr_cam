@@ -13,7 +13,7 @@ curl -fsSL https://raw.githubusercontent.com/silverefendy/nvr_cam/main/scripts/i
 ## Akses Setelah Install
 
 - **Web Dashboard:** `http://IP-SERVER` (dari jaringan lokal)
-- **Login default:** `admin` / `cctv1234`
+- **Login default:** `admin` / `nvr1234`
 - **API Docs:** `http://IP-SERVER/api/docs`
 
 ## Update Aplikasi
@@ -46,7 +46,7 @@ nvr_cam/
 │       └── services/ ← API service layer
 ├── config/           ← cameras.yaml, system.yaml, storage.yaml
 ├── scripts/          ← install.sh, update.sh, nginx, systemd
-└── Docs/             ← NVR_CAM_Blueprint.md (arsitektur lengkap)
+└── docs/             ← NVR_CAM_Blueprint.md + audit engineering
 ```
 
 ## Tech Stack
@@ -106,6 +106,8 @@ cd frontend && npm install && npm run dev
 # Buka http://localhost:5173
 ```
 
-## Progress & Handoff
+## Progress, Handoff, and Audit
 
-Lihat **[PROGRESS.md](PROGRESS.md)** untuk status implementasi terkini dan panduan melanjutkan development.
+- **[HANDOFF.md](HANDOFF.md)** - status implementasi terkini dan panduan melanjutkan development.
+- **[ISSUES.md](ISSUES.md)** - bug, backlog, dan verifikasi yang masih terbuka.
+- **[docs/AUDIT_REPORT.md](docs/AUDIT_REPORT.md)** - audit engineering terbaru dan rekomendasi prioritas.

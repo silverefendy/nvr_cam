@@ -123,7 +123,7 @@ Serve dengan Range header support (206 Partial Content)
 | `ISSUES.md` | Semua bug historis + issue aktif + backlog | Saat cek history, mau fix bug, atau tambah fitur |
 | `FEATURES.md` | Daftar lengkap 130 fitur + status | Saat mau cek/tambah fitur spesifik |
 | `README.md` | Setup, quick start, struktur proyek | Saat setup awal |
-| `Docs/NVR_CAM_Blueprint.md` | Arsitektur teknis lengkap | Saat perlu pahami desain sistem |
+| `docs/NVR_CAM_Blueprint.md` | Arsitektur teknis lengkap | Saat perlu pahami desain sistem |
 
 ---
 
