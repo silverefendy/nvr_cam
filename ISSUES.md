@@ -2,7 +2,7 @@
 ## Issue Tracker & Status Penyelesaian
 
 **Dibuat:** 22 Juli 2026  
-**Diperbarui:** 26 Juli 2026, 20:30 WIB (Sesi #015 — Fix playback file >100MB, file 0MB, duplikasi fungsi ffmpeg)  
+**Diperbarui:** 26 Juli 2026, 21:30 WIB (Sesi #016 — Sort & Filter halaman Cameras + LiveView)  
 **Repo:** https://github.com/silverefendy/nvr_cam
 
 > File ini mencatat semua issue/task yang sedang dikerjakan atau sudah selesai.  
@@ -20,6 +20,47 @@
 | ⏭️ | Ditunda / skip untuk sekarang |
 | ❌ | Dibatalkan |
 | ⚠️ | Perlu verifikasi lanjut |
+
+---
+
+## 🎨 Fitur Sesi #016 — Sort & Filter Halaman Cameras + LiveView
+
+> **Tanggal:** 26 Juli 2026, 21:30 WIB  
+> **Scope:** UI improvement — tabel Cameras bisa di-sort per kolom & di-filter, panel filter LiveView juga mendapat sort
+
+### Fitur Baru
+
+| ID | Fitur | File | Status |
+|----|-------|------|--------|
+| C-15 | Sort tabel Cameras per kolom (ID, Name, Location, Status, Storage, Motion, Retention) — klik header toggle asc/desc, ada ikon ↑↓ | `Cameras/index.tsx` | ✅ Done |
+| C-16 | Filter bar di halaman Cameras — search teks (ID/Name/Location) + dropdown filter Status (All/Online/Offline) | `Cameras/index.tsx` | ✅ Done |
+| C-17 | Sort kamera di panel filter LiveView — tombol sort by Name, Location, Status (online dulu / offline dulu) | `LiveView/index.tsx` | ✅ Done |
+
+**Detail implementasi:**
+- `Cameras/index.tsx`: tambah state `sortKey`, `sortDir`, `filterStatus`, `filterSearch`. Header kolom jadi clickable dengan ikon sort. Filter bar muncul di bawah header page (search input + dropdown status). Data diproses: filter dulu → sort. Tidak ada perubahan ke backend.
+- `LiveView/index.tsx`: di panel filter (showFilter), tambah row tombol sort di atas chip kamera. Sort state: `sortBy` ('name' | 'location' | 'status') + `sortDir` ('asc' | 'desc'). Chip kamera diurutkan sesuai pilihan.
+
+**Catatan:** Ini murni client-side sort/filter — tidak ada request tambah ke API.
+
+### Cara Apply
+
+```powershell
+# Jalankan perintah ini di PowerShell (C:\github\silverefendy\nvr_cam\)
+git pull
+```
+
+Lalu copy-paste isi file dari script PS1 yang akan Claude berikan, atau run:
+
+```powershell
+cd frontend
+npm run build
+```
+
+Verifikasi:
+1. Buka halaman **Cameras** → klik header kolom "Name" → harus sort A-Z, klik lagi → Z-A
+2. Coba filter "Pos" di search box → hanya tampil kamera yang ada kata "Pos"
+3. Dropdown status "Offline" → hanya tampil kamera offline
+4. Buka **Live View** → klik tombol Filter → coba tombol sort "Name" / "Status"
 
 ---
 
@@ -59,13 +100,6 @@
 git pull && docker compose up --build -d api
 ```
 
-Verifikasi:
-1. Buka halaman Playback → pilih kamera + tanggal
-2. Klik ▶ Putar di rekaman yang **berukuran >100MB**
-3. Video harus bisa diputar (mungkin ada delay 2–10 menit untuk HEVC pertama kali)
-4. Cek log: `docker compose logs --tail 30 api` — cari baris `probe_codec`, `transcode`, atau `Hapus ... file rekaman kosong`
-5. Pastikan file 0MB sudah tidak muncul di list rekaman
-
 ---
 
 ## 🐛 Bug Fixes Sesi #014b — Fix 401 Unauthorized saat Playback Video
@@ -78,23 +112,6 @@ Verifikasi:
 | ID | Bug | Root Cause | Status |
 |----|-----|------------|--------|
 | BUG-046 | `GET /api/v1/recordings/{id}/play` selalu 401 Unauthorized | HTML5 `<video src="...">` tidak bisa kirim `Authorization: Bearer ...` header secara otomatis. Browser buka URL video langsung tanpa token. Backend auth middleware tolak request → 401 sebelum sampai ke logic codec/streaming | ✅ Fixed |
-
-**Fix detail (BUG-046):**
-- `auth.py`: tambah `get_current_user_flexible()` — cek `Authorization` header dulu, fallback ke query param `?token=...`; tambah import `Request`
-- `recordings.py` (endpoint `/play`): ganti `Depends(get_current_user)` → tambah `token: str | None = Query(None, alias="token")` + inject `get_current_user_flexible()` di body
-- `recordings.ts` (frontend): `playUrl()` sekarang append `?token=<jwt>` ke URL dengan baca dari `localStorage.getItem('access_token')`
-
-**Info codec kamera dari log (26 Juli 2026):**
-| Kamera | Codec | HLS Mode |
-|--------|-------|----------|
-| cam_01 | mjpeg | stream copy |
-| cam_02 | h264 | stream copy |
-| cam_03 | h264 | stream copy |
-| cam_04 | **hevc** | transcode H.264 ✅ |
-| cam_05 | h264 | stream copy |
-| cam_06 | h264 | stream copy |
-| cam_07 | h264 | stream copy |
-| cam_08 | **hevc** | transcode H.264 ✅ |
 
 ---
 
@@ -110,20 +127,15 @@ Verifikasi:
 | BUG-044 | Playback rekaman error "No video with supported format and MIME type found" | Dua kemungkinan: (1) File rekaman bercodec HEVC/H.265 — browser Chrome/Firefox tidak support HEVC di HTML5 `<video>` natively. (2) File lama tanpa `-movflags +faststart` (moov atom di akhir). Backend tidak mendeteksi codec aktual sebelum serve — langsung stream file mentah ke browser. | ✅ Fixed |
 | BUG-045 | Kolom `codec` di DB selalu isi "H264" meskipun kamera rekam HEVC | `_save_recording_to_db()` hardcode `codec="H264"` tanpa probe file aktual | ✅ Fixed |
 
-**Fix detail:** Buat fungsi `probe_codec_from_file()` dan `transcode_to_h264()` di `ffmpeg_wrapper.py`. Koneksi ke endpoint `/play` diselesaikan di sesi #015 (BUG-047).
-
 ---
 
 ## 🐛 Bug Fixes Sesi #013 — Fix Ganti IP Kamera Tidak Apply
 
-> **Tanggal:** 25 Juli 2026  
-> **Scope:** Edit kamera (ganti IP) tidak efektif setelah save — recorder tetap pakai konfigurasi lama
-
-### Bug Fixes
+> **Tanggal:** 25 Juli 2026
 
 | ID | Bug | Root Cause | Status |
 |----|-----|------------|--------|
-| BUG-043 | Ganti IP kamera tidak apply — recorder tetap streaming dari IP lama setelah edit & save | Dua root cause: (1) `restart_camera()` tidak ada locking → beberapa PUT berturut-turut (save 3 kamera) trigger restart concurrent untuk kamera yang sama; recorder baru start sebelum yang lama mati → konflik HLS segment → error `Invalid data found`. (2) File HLS lama (*.ts + index.m3u8) tidak dibersihkan saat restart → FFmpeg baru baca manifest stale yang referensikan segment dari RTSP sebelumnya. | ✅ Fixed |
+| BUG-043 | Ganti IP kamera tidak apply | Dua root cause: (1) `restart_camera()` tidak ada locking → restart concurrent; (2) File HLS lama tidak dibersihkan saat restart | ✅ Fixed |
 
 ---
 
@@ -145,7 +157,7 @@ Verifikasi:
 | ID | Bug | Status |
 |----|-----|--------|
 | BUG-038 | Tombol grid tidak sinkron dengan jumlah kamera | ✅ Fixed |
-| BUG-039 | Live View tampilan jelek — sudut rounded, background putih | ✅ Fixed |
+| BUG-039 | Live View tampilan jelek | ✅ Fixed |
 | BUG-040 | Drag-drop kamera di grid tidak ada | ✅ Fixed |
 | BUG-041 | Error tambah kamera silent fail | ✅ Fixed |
 
@@ -191,6 +203,7 @@ Verifikasi:
 |-------|-------|--------|
 | Batch 1 — Live View | C-05 Fullscreen, C-06 Grid pilihan, C-07 Filter, C-08 Drag-drop, C-11 Toggle stream, C-13 PiP, C-14 Floating Mode | ✅ Selesai |
 | Batch 2 — Download Rekaman | D-09 Download | ✅ Selesai |
+| Batch 2b — Cameras Sort+Filter | C-15 Sort tabel, C-16 Filter tabel, C-17 Sort LiveView filter | ✅ Selesai |
 | Batch 3 — Alert Disk | F-08, F-09, F-10 | ⏳ Belum mulai |
 
 ---
@@ -202,6 +215,8 @@ Verifikasi:
 | 1 | BUG-032: 403 di `/api/v1/config/system` | `SELECT username, role FROM users;` di DB |
 | 2 | BUG-047: Playback file >100MB bisa diputar setelah fix sesi #015 | `docker compose up --build -d api`, buka Playback, klik file >100MB |
 | 3 | BUG-048: File 0MB sudah tidak muncul di UI | Buka halaman Playback, pastikan semua item punya ukuran file valid |
+| 4 | C-15/C-16: Sort & filter tabel Cameras | Klik header kolom Name → sort. Ketik "Pos" di search → filter |
+| 5 | C-17: Sort kamera di LiveView filter panel | Buka LiveView → Filter → coba tombol sort Name/Status |
 
 ---
 
@@ -310,3 +325,4 @@ Verifikasi:
 | 12 | 26 Juli 2026 | #014 | Claude | Fix BUG-044 (playback HEVC error) + BUG-045 (codec hardcode H264) |
 | 13 | 26 Juli 2026 | #014b | Claude | Fix BUG-046 (401 saat play video — token via query param, get_current_user_flexible) |
 | 14 | 26 Juli 2026 | #015 | Claude | Fix BUG-047 (playback >100MB HEVC tidak di-transcode), BUG-048 (file 0MB), BUG-049 (duplikasi fungsi ffmpeg_wrapper), BUG-050 (timeout remux terlalu pendek) |
+| 15 | 26 Juli 2026 | #016 | Claude | Fitur C-15 (sort tabel Cameras), C-16 (filter tabel Cameras), C-17 (sort kamera di LiveView filter panel) |

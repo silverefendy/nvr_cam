@@ -1,8 +1,8 @@
 # HANDOFF DOCUMENT — nvr_cam
 ## Panduan Melanjutkan Development di Sesi Baru
 
-**Terakhir diperbarui:** 26 Juli 2026, 20:30 WIB  
-**Sesi Terakhir:** #015 (Claude — Fix playback file >100MB, cleanup file 0MB, duplikasi ffmpeg_wrapper)  
+**Terakhir diperbarui:** 26 Juli 2026, 21:30 WIB  
+**Sesi Terakhir:** #016 (Claude — Sort & Filter tabel Cameras + sort LiveView filter panel)  
 **Repo:** https://github.com/silverefendy/nvr_cam
 
 ---
@@ -17,14 +17,15 @@ Akses via MCP GitHub. Baca file-file ini sebelum mulai:
 1. HANDOFF.md   → status proyek + panduan ini
 2. ISSUES.md    → semua bug + issue + backlog
 
-Progress per 26 Juli 2026, 20:30 WIB (Sesi #015 selesai):
+Progress per 26 Juli 2026, 21:30 WIB (Sesi #016 selesai):
 - Backend:     ✅ SELESAI
-- Frontend:    ✅ SELESAI
+- Frontend:    ✅ SELESAI (perlu npm run build setelah git pull)
 - Flutter:     🟡 Code ada, flutter analyze belum diverifikasi
 - Deploy:      ✅ scripts/install.sh siap untuk native Ubuntu
 - Docker mode: ✅ Sudah bisa jalan
-- Live View:   ✅ Grid selector, fullscreen, PiP, toggle stream, drag-drop, filter kamera, floating mode
+- Live View:   ✅ Grid selector, fullscreen, PiP, toggle stream, drag-drop, filter kamera, floating mode, sort filter panel
 - Playback:    ✅ Auth token fix, HEVC transcode, file >100MB sudah bisa diputar, file 0MB tidak muncul
+- Cameras:     ✅ Sort per kolom (klik header), filter search + dropdown status
 
 Stack: FastAPI (Python 3.12) + PostgreSQL 16 + React/Vite (TypeScript) + Flutter
 Server: Ubuntu Server 24.04, Intel i5, 8x WD Purple 4TB ZFS
@@ -47,6 +48,24 @@ Next task: [sebutkan apa yang mau dikerjakan]
 
 ---
 
+## Yang Baru Selesai di Sesi #016
+
+| Fitur | File | Keterangan |
+|-------|------|------------|
+| C-15 Sort tabel Cameras | `Cameras/index.tsx` | Klik header kolom → sort asc/desc. Kolom yang aktif ada ikon ↑↓. Semua kolom bisa di-sort: ID, Name, Location, Status, Storage, Motion, Retention |
+| C-16 Filter tabel Cameras | `Cameras/index.tsx` | Search bar (filter ID/Name/Location) + dropdown status (All/Online/Offline). Muncul di bawah header bar. |
+| C-17 Sort di LiveView filter panel | `LiveView/index.tsx` | Tombol sort by Name / Location / Status di panel filter. Klik lagi toggle asc/desc. |
+
+**Catatan:** Ini murni client-side — tidak ada perubahan backend.
+
+**Cara apply:**
+```powershell
+git pull
+cd frontend && npm run build
+```
+
+---
+
 ## Yang Baru Selesai di Sesi #015
 
 | Fix | File | Keterangan |
@@ -55,11 +74,6 @@ Next task: [sebutkan apa yang mau dikerjakan]
 | BUG-048 | `camera_recorder.py`, `recordings.py` (list) | File 0MB: hapus dari disk setelah setiap segment, filter dari list API |
 | BUG-049 | `ffmpeg_wrapper.py` | Hapus duplikasi `probe_codec_from_file()` dan `transcode_to_h264()` |
 | BUG-050 | `ffmpeg_wrapper.py` | Timeout `remux_for_streaming` naik 60s→300s, `transcode_to_h264` naik 600s→1200s |
-
-**Perlu dilakukan setelah pull:**
-```bash
-git pull && docker compose up --build -d api
-```
 
 ---
 
@@ -99,17 +113,12 @@ Probe codec file (ffprobe, <1 detik)
 Serve dengan Range header support (206 Partial Content)
 ```
 
-**Catatan cache:**
-- Cache disimpan di `/tmp/nvr_remux/` di dalam container
-- Cache **hilang** saat container restart → transcode ulang di request pertama
-- Cache tidak ada batas size otomatis (TODO: tambahkan cleanup jika storage /tmp penuh)
-
 ---
 
 ## Dokumen Referensi
 
 | File | Isi | Kapan Dibaca |
-|------|-----|-------------|
+|------|-----|--------------|
 | `HANDOFF.md` | File ini — panduan cepat + template | Selalu, pertama kali |
 | `ISSUES.md` | Semua bug historis + issue aktif + backlog | Saat cek history, mau fix bug, atau tambah fitur |
 | `FEATURES.md` | Daftar lengkap 130 fitur + status | Saat mau cek/tambah fitur spesifik |
@@ -147,7 +156,7 @@ docker compose up --build -d
 ## Next Steps yang Direkomendasikan
 
 | Prioritas | Task | ID |
-|-----------|------|-----|
+|-----------|------|----|
 | 🔴 Tinggi | Verifikasi BUG-032: 403 di `/api/v1/config/system` | BUG-032 |
 | 🔴 Tinggi | Verifikasi BUG-047–048: playback file >100MB + file 0MB tidak muncul | BUG-047, BUG-048 |
 | 🟠 Sedang | UI redesign 6 halaman sisa ke tema terang | ISSUES.md bagian UI |
