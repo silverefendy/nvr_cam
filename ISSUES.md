@@ -2,7 +2,7 @@
 ## Issue Tracker & Status Penyelesaian
 
 **Dibuat:** 22 Juli 2026  
-**Diperbarui:** 25 Juli 2026, 17:10 WIB (Sesi #013 — Fix ganti IP kamera tidak apply)  
+**Diperbarui:** 26 Juli 2026, 20:30 WIB (Sesi #015 — Fix playback file >100MB, file 0MB, duplikasi fungsi ffmpeg)  
 **Repo:** https://github.com/silverefendy/nvr_cam
 
 > File ini mencatat semua issue/task yang sedang dikerjakan atau sudah selesai.  
@@ -23,9 +23,54 @@
 
 ---
 
+## 🐛 Bug Fixes Sesi #015 — Fix Playback File >100MB, File 0MB, Cleanup Duplikasi
+
+> **Tanggal:** 26 Juli 2026, 20:30 WIB  
+> **Scope:** Playback file besar gagal, file 0MB menumpuk di storage, duplikasi fungsi di ffmpeg_wrapper.py
+
+### Bug Fixes
+
+| ID | Bug | Root Cause | Status |
+|----|-----|------------|--------|
+| BUG-047 | Playback file >100MB error "No video with supported format and MIME type found" | Fungsi `probe_codec_from_file()` dan `transcode_to_h264()` sudah dibuat di sesi #014 di `ffmpeg_wrapper.py`, tapi **tidak pernah dipanggil** di endpoint `/play`. Endpoint masih pakai logic lama (hanya cek faststart). File kecil <100MB kebetulan H.264 sehingga bisa jalan. File besar kemungkinan HEVC — tidak di-transcode — langsung error di browser. | ✅ Fixed |
+| BUG-048 | File 0MB menumpuk di storage dan muncul di list rekaman | FFmpeg crash/timeout sebelum sempat write data → file .mp4 dibuat tapi ukurannya 0 byte. Tidak ada mekanisme cleanup. File ini tetap muncul di DB dan UI tapi tidak bisa diputar. | ✅ Fixed |
+| BUG-049 | `ffmpeg_wrapper.py` ada duplikasi fungsi `probe_codec_from_file()` dan `transcode_to_h264()` (masing-masing definisi 2x) | Sisa dari sesi #014 — fungsi ditambahkan dua kali tanpa disadari. Python pakai definisi terakhir, tidak error, tapi code jadi tidak bersih dan membingungkan. | ✅ Fixed |
+| BUG-050 | `remux_for_streaming()` timeout terlalu pendek (60 detik) untuk file H.264 besar | File H.264 >500MB bisa makan waktu >60 detik saat remux. Timeout habis → fungsi return `False` → file tidak di-serve dengan benar. | ✅ Fixed (timeout naik ke 300 detik) |
+
+**Fix detail:**
+- `recordings.py` (`/play` endpoint): Sekarang **probe codec dulu** sebelum serve. Pipeline baru:
+  1. Cek cache → serve dari cache jika ada
+  2. Probe codec file via `probe_codec_from_file()`
+  3. HEVC → `transcode_to_h264()` (cache di `/tmp/nvr_remux/rec_{id}_h264.mp4`)
+  4. H.264 bukan faststart → `remux_for_streaming()` (cache di `/tmp/nvr_remux/rec_{id}.mp4`)
+  5. H.264 + faststart → serve langsung
+  6. File 0MB → return HTTP 422 dengan pesan error jelas
+- `recordings.py` (list endpoint): Filter rekaman dengan `file_size_mb = 0` dari response — tidak muncul di UI
+- `camera_recorder.py`: Tambah `_cleanup_empty_files()` — hapus file MP4 <1KB dari disk **sebelum** `_save_recording_to_db()` dipanggil. Dipanggil setelah setiap segment FFmpeg selesai.
+- `camera_recorder.py` (`_save_recording_to_db`): Probe codec aktual via `probe_codec_from_file()` — simpan `"H265"` atau `"H264"` ke DB sesuai isi file
+- `ffmpeg_wrapper.py`: Hapus duplikasi fungsi (2x `probe_codec_from_file` dan 2x `transcode_to_h264`). Timeout `remux_for_streaming` naik dari 60s ke 300s. Timeout `transcode_to_h264` naik dari 600s ke 1200s untuk file sangat besar.
+
+**Klarifikasi — Setting H.265 di Aplikasi:**
+> Tidak ada setting H.265 di aplikasi NVR ini karena **by design** — konfigurasi codec H.265 ada di **kamera Dahua langsung** (buka web UI kamera: `http://<IP_kamera>` → Setting → Camera → Video → Encode). Aplikasi NVR hanya terima stream RTSP dari kamera dan otomatis deteksi codecnya via `probe_codec_from_file()`.
+
+### ⚠️ Perlu Dilakukan Setelah Pull
+
+```bash
+git pull && docker compose up --build -d api
+```
+
+Verifikasi:
+1. Buka halaman Playback → pilih kamera + tanggal
+2. Klik ▶ Putar di rekaman yang **berukuran >100MB**
+3. Video harus bisa diputar (mungkin ada delay 2–10 menit untuk HEVC pertama kali)
+4. Cek log: `docker compose logs --tail 30 api` — cari baris `probe_codec`, `transcode`, atau `Hapus ... file rekaman kosong`
+5. Pastikan file 0MB sudah tidak muncul di list rekaman
+
+---
+
 ## 🐛 Bug Fixes Sesi #014b — Fix 401 Unauthorized saat Playback Video
 
-> **Tanggal:** 26 Juli 2026
+> **Tanggal:** 26 Juli 2026  
 > **Scope:** Video tidak bisa diputar di halaman Playback — muncul error atau layar hitam
 
 ### Bug Fixes
@@ -51,25 +96,11 @@
 | cam_07 | h264 | stream copy |
 | cam_08 | **hevc** | transcode H.264 ✅ |
 
-### ⚠️ Perlu Dilakukan Setelah Pull
-
-```bash
-git pull && docker compose up --build -d api frontend
-```
-
-Verifikasi:
-1. Buka halaman Playback → pilih kamera + tanggal
-2. Klik ▶ Putar
-3. Buka DevTools → Network tab → cari request ke `/api/v1/recordings/.../play`
-4. URL harus ada `?token=eyJ...` di belakangnya
-5. Status response harus **200**, bukan 401
-6. Video harus bisa diputar
-
 ---
 
 ## 🐛 Bug Fixes Sesi #014 — Fix Playback HEVC + Codec Detection
 
-> **Tanggal:** 26 Juli 2026
+> **Tanggal:** 26 Juli 2026  
 > **Scope:** Playback rekaman gagal dengan error "No video with supported format and MIME type found"
 
 ### Bug Fixes
@@ -79,65 +110,7 @@ Verifikasi:
 | BUG-044 | Playback rekaman error "No video with supported format and MIME type found" | Dua kemungkinan: (1) File rekaman bercodec HEVC/H.265 — browser Chrome/Firefox tidak support HEVC di HTML5 `<video>` natively. (2) File lama tanpa `-movflags +faststart` (moov atom di akhir). Backend tidak mendeteksi codec aktual sebelum serve — langsung stream file mentah ke browser. | ✅ Fixed |
 | BUG-045 | Kolom `codec` di DB selalu isi "H264" meskipun kamera rekam HEVC | `_save_recording_to_db()` hardcode `codec="H264"` tanpa probe file aktual | ✅ Fixed |
 
-**Fix detail (BUG-044 + BUG-045):**
-- `ffmpeg_wrapper.py`: tambah `probe_codec_from_file()` — probe codec dari file lokal via ffprobe
-- `ffmpeg_wrapper.py`: tambah `transcode_to_h264()` — transcode HEVC ke H.264 MP4 dengan `-movflags +faststart`, cache hasil di `/tmp/nvr_remux/rec_{id}_h264.mp4`
-- `recordings.py` (`/play` endpoint): probe codec file dulu sebelum serve. Jika HEVC → transcode ke H.264 (cached). Jika H.264 → cek faststart, remux jika perlu (behaviour lama).
-- `camera_recorder.py` (`_save_recording_to_db`): ganti hardcode `"H264"` dengan probe aktual via `probe_codec_from_file()`, simpan `"H265"` atau `"H264"` sesuai isi file.
-
-**Catatan penting:**
-- Transcode HEVC → H.264 untuk file besar (600+ MB) memakan waktu **2–5 menit** pada request pertama. Request berikutnya langsung serve dari cache.
-- Cache di `/tmp/nvr_remux/` akan hilang saat container restart — transcode ulang di request pertama setelah restart.
-- Jika kamera memang kirim H.264 dan masalah hanya faststart, proses remux jauh lebih cepat (~10 detik).
-
-### ⚠️ Perlu Dilakukan Setelah Pull
-
-```bash
-git pull && docker compose up --build -d api
-```
-
-Verifikasi:
-1. Buka halaman Playback, pilih kamera + tanggal
-2. Klik ▶ Putar di salah satu rekaman
-3. Video harus bisa diputar (mungkin ada delay 2–5 menit untuk HEVC pertama kali)
-4. Cek log: `docker compose logs --tail 30 api` — cari baris `probe_codec` atau `transcode`
-
----
-
-## 🐛 Bug Fixes Sesi #014 — Fix Playback HEVC + Codec Detection
-
-> **Tanggal:** 26 Juli 2026
-> **Scope:** Playback rekaman gagal dengan error "No video with supported format and MIME type found"
-
-### Bug Fixes
-
-| ID | Bug | Root Cause | Status |
-|----|-----|------------|--------|
-| BUG-044 | Playback rekaman error "No video with supported format and MIME type found" | Dua kemungkinan: (1) File rekaman bercodec HEVC/H.265 — browser Chrome/Firefox tidak support HEVC di HTML5 `<video>` natively. (2) File lama tanpa `-movflags +faststart` (moov atom di akhir). Backend tidak mendeteksi codec aktual sebelum serve — langsung stream file mentah ke browser. | ✅ Fixed |
-| BUG-045 | Kolom `codec` di DB selalu isi "H264" meskipun kamera rekam HEVC | `_save_recording_to_db()` hardcode `codec="H264"` tanpa probe file aktual | ✅ Fixed |
-
-**Fix detail (BUG-044 + BUG-045):**
-- `ffmpeg_wrapper.py`: tambah `probe_codec_from_file()` — probe codec dari file lokal via ffprobe
-- `ffmpeg_wrapper.py`: tambah `transcode_to_h264()` — transcode HEVC ke H.264 MP4 dengan `-movflags +faststart`, cache hasil di `/tmp/nvr_remux/rec_{id}_h264.mp4`
-- `recordings.py` (`/play` endpoint): probe codec file dulu sebelum serve. Jika HEVC → transcode ke H.264 (cached). Jika H.264 → cek faststart, remux jika perlu (behaviour lama).
-- `camera_recorder.py` (`_save_recording_to_db`): ganti hardcode `"H264"` dengan probe aktual via `probe_codec_from_file()`, simpan `"H265"` atau `"H264"` sesuai isi file.
-
-**Catatan penting:**
-- Transcode HEVC → H.264 untuk file besar (600+ MB) memakan waktu **2–5 menit** pada request pertama. Request berikutnya langsung serve dari cache.
-- Cache di `/tmp/nvr_remux/` akan hilang saat container restart — transcode ulang di request pertama setelah restart.
-- Jika kamera memang kirim H.264 dan masalah hanya faststart, proses remux jauh lebih cepat (~10 detik).
-
-### ⚠️ Perlu Dilakukan Setelah Pull
-
-```bash
-git pull && docker compose up --build -d api
-```
-
-Verifikasi:
-1. Buka halaman Playback, pilih kamera + tanggal
-2. Klik ▶ Putar di salah satu rekaman
-3. Video harus bisa diputar (mungkin ada delay 2–5 menit untuk HEVC pertama kali)
-4. Cek log: `docker compose logs --tail 30 api` — cari baris `probe_codec` atau `transcode`
+**Fix detail:** Buat fungsi `probe_codec_from_file()` dan `transcode_to_h264()` di `ffmpeg_wrapper.py`. Koneksi ke endpoint `/play` diselesaikan di sesi #015 (BUG-047).
 
 ---
 
@@ -152,53 +125,16 @@ Verifikasi:
 |----|-----|------------|--------|
 | BUG-043 | Ganti IP kamera tidak apply — recorder tetap streaming dari IP lama setelah edit & save | Dua root cause: (1) `restart_camera()` tidak ada locking → beberapa PUT berturut-turut (save 3 kamera) trigger restart concurrent untuk kamera yang sama; recorder baru start sebelum yang lama mati → konflik HLS segment → error `Invalid data found`. (2) File HLS lama (*.ts + index.m3u8) tidak dibersihkan saat restart → FFmpeg baru baca manifest stale yang referensikan segment dari RTSP sebelumnya. | ✅ Fixed |
 
-**Fix detail (BUG-043):**
-- `manager.py`: tambah `_restart_locks: dict[str, asyncio.Lock]` — per-camera lock agar `restart_camera` tidak berjalan concurrent untuk kamera yang sama. Restart kedua menunggu yang pertama selesai, lalu pakai config terbaru dari DB.
-- `manager.py`: tambah `await asyncio.sleep(2)` setelah `stop()` — beri waktu FFmpeg lama release file handle sebelum recorder baru start.
-- `camera_recorder.py`: tambah `_clear_hls_files()` — hapus semua `*.ts` dan `*.m3u8` di direktori HLS sebelum FFmpeg baru dijalankan. Dipanggil di awal `_run_hls_loop()`.
-
-**Catatan:** Data di DB sudah benar sejak awal (RTSP URL sudah di-update saat PUT). Masalah murni di timing restart recorder, bukan di penyimpanan konfigurasi.
-
-### ⚠️ Perlu Dilakukan Setelah Pull
-
-```bash
-git pull && docker compose up --build -d api
-```
-
-Verifikasi:
-1. Edit kamera, ganti IP, klik Save
-2. Tunggu ~10 detik
-3. Cek log: `docker compose logs --tail 20 api` — harusnya ada `Restarted recording for camera cam_XX` sekali saja (bukan berkali-kali)
-4. Live view harusnya tampil dari IP baru tanpa error `Invalid data found`
-
 ---
 
 ## 🐛 Fix + Fitur Sesi #012 — Adaptive Grid + Floating Window Mode
 
-> **Tanggal:** 25 Juli 2026  
-> **Scope:** Grid tidak mengisi layar penuh, tambah mode floating window
+> **Tanggal:** 25 Juli 2026
 
-### Bug Fixes
-
-| ID | Bug | Root Cause | Status |
-|----|-----|------------|--------|
-| BUG-042 | Grid kamera tidak mengisi tinggi layar — ada ruang kosong di bawah | `CameraGrid` hanya definisikan `gridTemplateColumns`, tidak `gridTemplateRows`. Browser tidak tahu tinggi per baris → semua kamera menumpuk atas | ✅ Fix: tambah `gridTemplateRows: repeat(N, 1fr)` agar baris mengisi container penuh. Tambah `min-height: 0` agar flex children tidak overflow |
-
-### Fitur Baru
-
-| ID | Fitur | File | Status |
-|----|-------|------|--------|
-| C-14 | **Floating Window Mode** — setiap kamera tampil sebagai window yang bisa di-drag dan di-resize | `FloatingCameraLayout.tsx` (baru), `LiveView/index.tsx` | ✅ |
-
-**Detail Floating Window Mode:**
-- Setiap kamera muncul sebagai window terpisah dengan header berwarna gelap
-- **Drag** window dengan menarik header (cursor move)
-- **Resize** window dari sudut kanan-bawah (resize handle ⟁)
-- **Minimize** window ke bar kecil (tombol `─`, restore dengan `▢`)
-- Dot hijau/merah di header menunjukkan status online/offline kamera
-- Window baru dimulai dari posisi tile otomatis (4 kolom), tidak tumpuk
-- Toggle antara Grid Mode (⊞) dan Floating Mode (⧉) ada di toolbar
-- Grid selector (1x1, 2x2, dll) hanya muncul di Grid Mode
+| ID | Bug/Fitur | Status |
+|----|-----------|--------|
+| BUG-042 | Grid kamera tidak mengisi tinggi layar | ✅ Fixed |
+| C-14 | Floating Window Mode (drag, resize, minimize) | ✅ Done |
 
 ---
 
@@ -212,8 +148,6 @@ Verifikasi:
 | BUG-039 | Live View tampilan jelek — sudut rounded, background putih | ✅ Fixed |
 | BUG-040 | Drag-drop kamera di grid tidak ada | ✅ Fixed |
 | BUG-041 | Error tambah kamera silent fail | ✅ Fixed |
-
-**Cleanup sesi #011:** hapus 4 script `fix_*.py` + 3 file `.md` redundan (PROGRESS, AUDIT_REPORT, SUMMARY, debug_summary)
 
 ---
 
@@ -233,9 +167,6 @@ Verifikasi:
 | BUG-035 | Sidebar mojibake emoji | ✅ Fixed |
 | BUG-036 | HLS 404 di nginx container | ✅ Fixed |
 | BUG-037 | Zustand user null setelah refresh | ✅ Fixed |
-
-**UI Redesign sesi #010 (tema terang):** Login, Sidebar, App.tsx, System, LiveView toolbar, CameraForm, RTSPTestButton, index.css  
-**Halaman BELUM diredesign:** Storage, Playback, Events, Cameras, Users, Settings
 
 ---
 
@@ -267,10 +198,10 @@ Verifikasi:
 ## ❓ Yang Masih Perlu Diverifikasi
 
 | # | Item | Cara Verifikasi |
-|---|------|-----------------|
+|---|------|----------------|
 | 1 | BUG-032: 403 di `/api/v1/config/system` | `SELECT username, role FROM users;` di DB |
-| 2 | BUG-043: ganti IP kamera apply dengan benar | `docker compose up --build -d api`, edit kamera, cek log |
-| 3 | Sesi #012 adaptive grid + floating mode | `docker compose up --build -d frontend` lalu tes kedua mode |
+| 2 | BUG-047: Playback file >100MB bisa diputar setelah fix sesi #015 | `docker compose up --build -d api`, buka Playback, klik file >100MB |
+| 3 | BUG-048: File 0MB sudah tidak muncul di UI | Buka halaman Playback, pastikan semua item punya ukuran file valid |
 
 ---
 
@@ -378,4 +309,4 @@ Verifikasi:
 | 11 | 25 Juli 2026 | #013 | Claude | Fix BUG-043 (ganti IP kamera tidak apply — per-camera lock + clear HLS) |
 | 12 | 26 Juli 2026 | #014 | Claude | Fix BUG-044 (playback HEVC error) + BUG-045 (codec hardcode H264) |
 | 13 | 26 Juli 2026 | #014b | Claude | Fix BUG-046 (401 saat play video — token via query param, get_current_user_flexible) |
-| 12 | 26 Juli 2026 | #014 | Claude | Fix BUG-044 (playback HEVC error) + BUG-045 (codec hardcode H264) |
+| 14 | 26 Juli 2026 | #015 | Claude | Fix BUG-047 (playback >100MB HEVC tidak di-transcode), BUG-048 (file 0MB), BUG-049 (duplikasi fungsi ffmpeg_wrapper), BUG-050 (timeout remux terlalu pendek) |
