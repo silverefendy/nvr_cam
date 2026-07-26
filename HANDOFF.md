@@ -1,8 +1,8 @@
 # HANDOFF DOCUMENT — nvr_cam
 ## Panduan Melanjutkan Development di Sesi Baru
 
-**Terakhir diperbarui:** 26 Juli 2026, 21:30 WIB  
-**Sesi Terakhir:** #016 (Claude — Sort & Filter tabel Cameras + sort LiveView filter panel)  
+**Terakhir diperbarui:** 26 Juli 2026, 23:45 WIB
+**Sesi Terakhir:** #017 (Codex — bug fixes + observability + playback queue)
 **Repo:** https://github.com/silverefendy/nvr_cam
 
 ---
@@ -157,14 +157,44 @@ docker compose up --build -d
 
 | Prioritas | Task | ID |
 |-----------|------|----|
-| 🔴 Tinggi | Verifikasi BUG-032: 403 di `/api/v1/config/system` | BUG-032 |
-| 🔴 Tinggi | Verifikasi BUG-047–048: playback file >100MB + file 0MB tidak muncul | BUG-047, BUG-048 |
-| 🟠 Sedang | UI redesign 6 halaman sisa ke tema terang | ISSUES.md bagian UI |
-| 🟠 Sedang | Batch 3 — Alert disk kritis via Telegram | F-10 |
-| 🟡 Rendah | Cache cleanup otomatis untuk /tmp/nvr_remux jika penuh | — |
+| 🔴 Tinggi | Verifikasi BUG-051–053 di UI setelah jalankan script frontend sesi #017 | BUG-051, BUG-052, BUG-053 |
+| 🔴 Tinggi | Verifikasi A-06 end-to-end: profile, ganti password, reset password admin | A-06 |
+| 🟠 Sedang | Lengkapi UI frontend Wave 5 yang belum terotomasi penuh bila ada mismatch build | W5-UX |
+| 🟠 Sedang | Tambah alerting lebih luas selain storage (CPU/RAM/container failure) | Wave 4 |
+| 🟡 Rendah | UI redesign 6 halaman sisa ke tema terang | ISSUES.md bagian UI |
 | 🟡 Rendah | Snapshot lightbox (klik foto → modal besar) | E-07 |
 
 ---
+
+## Update Sesi #017 — Minggu, 26 Juli 2026
+
+### Backend
+
+- `PUT /api/v1/users/me/password` untuk ganti password sendiri.
+- `PUT /api/v1/users/{user_id}/reset-password` untuk reset password oleh admin.
+- `GET /api/v1/storage/diagnostics` untuk `camera_drive_map`, drive status, `recording_status`, dan `transcode_cache`.
+- `GET /api/v1/audit-logs` + model/migration `audit_logs`.
+- Middleware `X-Request-ID` + structured JSON logging.
+- Health endpoint diperluas dengan kamera, storage, process count, dan `last_errors`.
+- Playback queue async (`TranscodeQueue`) untuk transcode/remux di luar request path.
+- `Dockerfile.backend` sudah copy `scripts/` agar `scripts/setup_db.py` tersedia di container.
+
+### Frontend
+
+- Patch frontend tidak di-push langsung ke source `.tsx`/`.ts`.
+- Gunakan script `scripts/apply_frontend_s017.ps1` untuk apply perubahan UI/UX sesi ini.
+
+### Verifikasi cepat
+
+```powershell
+git pull
+docker compose up --build -d
+docker exec cctv_api alembic upgrade head
+docker exec cctv_api python -m pytest backend/tests -q
+powershell -ExecutionPolicy Bypass -File .\scripts\apply_frontend_s017.ps1
+cd frontend
+npm run build
+```
 
 ## Informasi Proyek
 

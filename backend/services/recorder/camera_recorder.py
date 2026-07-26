@@ -28,6 +28,10 @@ HLS_BASE_DIR = Path("/var/lib/nvr_cam/hls")
 
 
 class CameraRecorder:
+    _active_ffmpeg_count = 0
+    _active_ffmpeg_lock = asyncio.Lock()
+    _max_active_ffmpeg = 30
+
     def __init__(self, camera: dict):
         self.camera = camera
         self.camera_id = camera["id"]
@@ -39,6 +43,31 @@ class CameraRecorder:
         self.started_at: datetime | None = None
         self._last_seen: datetime | None = None
         self._segment_started_at: datetime | None = None
+        self.last_error: str | None = None
+        self._record_slot_acquired = False
+        self._hls_slot_acquired = False
+
+    @classmethod
+    async def _wait_for_ffmpeg_slot(cls, camera_id: str):
+        while True:
+            async with cls._active_ffmpeg_lock:
+                if cls._active_ffmpeg_count < cls._max_active_ffmpeg:
+                    cls._active_ffmpeg_count += 1
+                    return
+                logger.warning(
+                    f"[{camera_id}] FFmpeg aktif sudah {cls._active_ffmpeg_count}; menunggu slot kosong",
+                    extra={"camera_id": camera_id, "action": "queue_ffmpeg"},
+                )
+            await asyncio.sleep(5)
+
+    @classmethod
+    async def _release_ffmpeg_slot(cls):
+        async with cls._active_ffmpeg_lock:
+            cls._active_ffmpeg_count = max(0, cls._active_ffmpeg_count - 1)
+
+    @classmethod
+    def active_ffmpeg_count(cls) -> int:
+        return cls._active_ffmpeg_count
 
     async def start(self):
         """Start recording dan HLS streaming secara concurrent (non-blocking)."""
@@ -67,7 +96,10 @@ class CameraRecorder:
     async def stop(self):
         """Stop semua proses FFmpeg dengan bersih."""
         self.is_running = False
-        for proc in [self._record_proc, self._hls_proc]:
+        for proc, slot_attr in [
+            (self._record_proc, "_record_slot_acquired"),
+            (self._hls_proc, "_hls_slot_acquired"),
+        ]:
             if proc and proc.returncode is None:
                 try:
                     proc.terminate()
@@ -77,6 +109,9 @@ class CameraRecorder:
                         proc.kill()
                     except ProcessLookupError:
                         pass
+                if getattr(self, slot_attr):
+                    await self._release_ffmpeg_slot()
+                    setattr(self, slot_attr, False)
         self._record_proc = None
         self._hls_proc = None
 
@@ -164,6 +199,11 @@ class CameraRecorder:
                         is_encoded_av1=False,
                     )
                     db.add(rec)
+                    size_mb = stat.st_size / (1024 * 1024)
+                    logger.info(
+                        f"[REC] Segment tersimpan: {mp4_file}, size: {size_mb:.1f}MB",
+                        extra={"camera_id": self.camera_id, "action": "segment_saved"},
+                    )
 
                 await db.commit()
                 logger.info(f"[{self.camera_id}] Metadata rekaman disimpan ke DB")
@@ -182,14 +222,23 @@ class CameraRecorder:
                 output_pattern = str(output_dir / "%H-%M-%S.mp4")
 
                 cmd = build_record_command(self.camera["rtsp_main"], output_pattern)
-                logger.info(f"[{self.camera_id}] Mulai recording")
+                logger.info(
+                    f"[REC] Camera {self.camera_id} mulai rekam ke {self.camera.get('storage_drive')}",
+                    extra={"camera_id": self.camera_id, "action": "start"},
+                )
 
                 self._segment_started_at = datetime.now(timezone.utc)
 
+                await self._wait_for_ffmpeg_slot(self.camera_id)
+                self._record_slot_acquired = True
                 self._record_proc = await asyncio.create_subprocess_exec(
                     *cmd,
                     stdout=asyncio.subprocess.DEVNULL,
                     stderr=asyncio.subprocess.PIPE,
+                )
+                logger.info(
+                    f"[{self.camera_id}] FFmpeg recording started pid={self._record_proc.pid}",
+                    extra={"camera_id": self.camera_id, "pid": self._record_proc.pid, "action": "start"},
                 )
 
                 manager = RecordingManager.get_instance()
@@ -197,10 +246,33 @@ class CameraRecorder:
                 self._last_seen = datetime.now(timezone.utc)
 
                 _, stderr_bytes = await self._record_proc.communicate()
+                if self._record_slot_acquired:
+                    await self._release_ffmpeg_slot()
+                    self._record_slot_acquired = False
                 if stderr_bytes:
                     last_err = stderr_bytes.decode(errors="replace").strip().splitlines()
                     if last_err:
-                        logger.debug(f"[{self.camera_id}] FFmpeg stderr: {last_err[-1]}")
+                        self.last_error = last_err[-1]
+                        logger.error(
+                            f"[{self.camera_id}] FFmpeg exited code={self._record_proc.returncode}: {self.last_error}",
+                            extra={
+                                "camera_id": self.camera_id,
+                                "pid": self._record_proc.pid,
+                                "action": "crash",
+                            },
+                        )
+                        manager.record_error(self.camera_id, self.last_error)
+                elif self._record_proc.returncode not in (0, None):
+                    self.last_error = f"FFmpeg exited with code {self._record_proc.returncode}"
+                    logger.error(
+                        f"[{self.camera_id}] {self.last_error}",
+                        extra={
+                            "camera_id": self.camera_id,
+                            "pid": self._record_proc.pid,
+                            "action": "crash",
+                        },
+                    )
+                    manager.record_error(self.camera_id, self.last_error)
 
                 # Cleanup file 0MB SEBELUM simpan ke DB
                 self._cleanup_empty_files(output_dir)
@@ -219,6 +291,11 @@ class CameraRecorder:
             except asyncio.CancelledError:
                 break
             except Exception as e:
+                if self._record_slot_acquired:
+                    await self._release_ffmpeg_slot()
+                    self._record_slot_acquired = False
+                self.last_error = str(e)
+                RecordingManager.get_instance().record_error(self.camera_id, self.last_error)
                 logger.error(f"[{self.camera_id}] Error recording loop: {e}")
                 if self.is_running:
                     await asyncio.sleep(self._reconnect_delay)
@@ -255,19 +332,48 @@ class CameraRecorder:
                     force_transcode=force_transcode,
                 )
 
+                await self._wait_for_ffmpeg_slot(self.camera_id)
+                self._hls_slot_acquired = True
                 self._hls_proc = await asyncio.create_subprocess_exec(
                     *cmd,
                     stdout=asyncio.subprocess.DEVNULL,
                     stderr=asyncio.subprocess.PIPE,
                 )
+                logger.info(
+                    f"[{self.camera_id}] FFmpeg HLS started pid={self._hls_proc.pid}",
+                    extra={"camera_id": self.camera_id, "pid": self._hls_proc.pid, "action": "start"},
+                )
 
                 _, stderr_bytes = await self._hls_proc.communicate()
+                if self._hls_slot_acquired:
+                    await self._release_ffmpeg_slot()
+                    self._hls_slot_acquired = False
                 if stderr_bytes:
                     err_lines = stderr_bytes.decode(errors="replace").strip().splitlines()
                     if err_lines:
+                        self.last_error = err_lines[-1]
                         logger.warning(
-                            f"[{self.camera_id}] HLS FFmpeg stderr: {err_lines[-1]}"
+                            f"[{self.camera_id}] HLS FFmpeg exited code={self._hls_proc.returncode}: {self.last_error}",
+                            extra={
+                                "camera_id": self.camera_id,
+                                "pid": self._hls_proc.pid,
+                                "action": "crash",
+                            },
                         )
+                        from backend.services.recorder.manager import RecordingManager
+                        RecordingManager.get_instance().record_error(self.camera_id, self.last_error)
+                elif self._hls_proc.returncode not in (0, None):
+                    self.last_error = f"HLS FFmpeg exited with code {self._hls_proc.returncode}"
+                    logger.warning(
+                        f"[{self.camera_id}] {self.last_error}",
+                        extra={
+                            "camera_id": self.camera_id,
+                            "pid": self._hls_proc.pid,
+                            "action": "crash",
+                        },
+                    )
+                    from backend.services.recorder.manager import RecordingManager
+                    RecordingManager.get_instance().record_error(self.camera_id, self.last_error)
 
                 if self.is_running:
                     logger.warning(f"[{self.camera_id}] HLS stream putus, retry dalam 5s")
@@ -276,6 +382,12 @@ class CameraRecorder:
             except asyncio.CancelledError:
                 break
             except Exception as e:
+                if self._hls_slot_acquired:
+                    await self._release_ffmpeg_slot()
+                    self._hls_slot_acquired = False
+                self.last_error = str(e)
+                from backend.services.recorder.manager import RecordingManager
+                RecordingManager.get_instance().record_error(self.camera_id, self.last_error)
                 logger.error(f"[{self.camera_id}] Error HLS loop: {e}")
                 if self.is_running:
                     await asyncio.sleep(10)
@@ -296,3 +408,13 @@ class CameraRecorder:
     @property
     def last_seen(self) -> datetime | None:
         return self._last_seen
+
+    @property
+    def segment_started_at(self) -> datetime | None:
+        return self._segment_started_at
+
+    @property
+    def recording_pid(self) -> int | None:
+        if self._record_proc and self._record_proc.returncode is None:
+            return self._record_proc.pid
+        return None

@@ -3,6 +3,7 @@ FastAPI application factory.
 Semua router didaftarkan di sini.
 """
 import asyncio
+import uuid
 import yaml
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -12,11 +13,13 @@ from fastapi.responses import JSONResponse
 
 from backend.core.exceptions import CCTVBaseException
 from backend.core.logging import get_logger
+from backend.core.logging import request_id_ctx
 from backend.core.config import settings as app_settings
 from backend.api.routers import (
     auth, cameras, stream, recordings, events, storage, users,
     settings as settings_router, system,
     config as config_router, discovery as discovery_router,
+    audit_logs as audit_logs_router,
 )
 from backend.db.base import AsyncSessionLocal
 from backend.db.repositories.camera_repo import CameraRepository
@@ -24,6 +27,7 @@ from backend.db.models.camera import Camera
 from backend.services.recorder.manager import RecordingManager
 from backend.services.storage.manager import StorageManager
 from backend.services.motion.manager import MotionManager
+from backend.services.transcode_queue import TranscodeQueue
 from backend.api.websocket import ConnectionManager
 
 logger = get_logger(__name__, service="api")
@@ -92,6 +96,7 @@ async def lifespan(app: FastAPI):
 
         camera_drive_map = {cam["id"]: cam["storage_drive"] for cam in camera_dicts}
         storage_manager = StorageManager(camera_drive_map)
+        recording_manager.storage_manager = storage_manager
         asyncio.create_task(storage_manager.monitor_loop())
         logger.info("Storage manager started")
 
@@ -104,6 +109,9 @@ async def lifespan(app: FastAPI):
         app.state.recording_manager = recording_manager
         app.state.storage_manager = storage_manager
         app.state.motion_manager = motion_manager
+        transcode_queue = TranscodeQueue.get_instance()
+        transcode_queue.start()
+        app.state.transcode_queue = transcode_queue
         app.state.websocket_manager = ConnectionManager()
 
         logger.info("NVR API service started successfully")
@@ -124,6 +132,11 @@ async def lifespan(app: FastAPI):
         if motion_manager:
             await motion_manager.stop_all()
             logger.info("Motion manager stopped")
+
+        transcode_queue = getattr(app.state, "transcode_queue", None)
+        if transcode_queue:
+            await transcode_queue.stop()
+            logger.info("Transcode queue stopped")
 
         from backend.db.base import engine
         await engine.dispose()
@@ -153,6 +166,18 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
+    @app.middleware("http")
+    async def request_id_middleware(request: Request, call_next):
+        request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
+        token = request_id_ctx.set(request_id)
+        request.state.request_id = request_id
+        try:
+            response = await call_next(request)
+        finally:
+            request_id_ctx.reset(token)
+        response.headers["X-Request-ID"] = request_id
+        return response
+
     @app.exception_handler(CCTVBaseException)
     async def cctv_exception_handler(request: Request, exc: CCTVBaseException):
         return JSONResponse(
@@ -171,6 +196,7 @@ def create_app() -> FastAPI:
     app.include_router(system.router,            prefix="/api/v1/system")
     app.include_router(config_router.router,     prefix="/api/v1/config")
     app.include_router(discovery_router.router,  prefix="/api/v1/discovery")
+    app.include_router(audit_logs_router.router, prefix="/api/v1/audit-logs")
 
     return app
 

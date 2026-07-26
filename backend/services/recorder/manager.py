@@ -4,6 +4,7 @@ Singleton yang di-start saat aplikasi boot.
 """
 import asyncio
 from datetime import datetime, timezone
+from collections import deque
 from backend.core.logging import get_logger
 from backend.db.base import AsyncSessionLocal
 from backend.db.repositories.camera_repo import CameraRepository
@@ -45,6 +46,7 @@ class RecordingManager:
         # Per-camera lock: pastikan restart_camera tidak berjalan concurrent
         # untuk kamera yang sama (misal: user save 3x berturut-turut).
         self._restart_locks: dict[str, asyncio.Lock] = {}
+        self.last_errors = deque(maxlen=10)
 
     @classmethod
     def get_instance(cls) -> "RecordingManager":
@@ -125,15 +127,17 @@ class RecordingManager:
                     # terdaftar untuk monitoring storage dan cleanup otomatis.
                     # Import di dalam fungsi untuk hindari circular import.
                     try:
-                        from backend.api.app import app
-                        storage_manager = getattr(app.state, "storage_manager", None)
+                        storage_manager = getattr(self, "storage_manager", None)
                         if storage_manager is not None:
-                            storage_manager.camera_drive_map[camera_id] = cam.storage_drive
+                            storage_manager.update_camera_drive(camera_id, cam.storage_drive)
                             logger.info(f"[{camera_id}] Terdaftar di storage_manager: {cam.storage_drive}")
                     except Exception as e:
                         logger.warning(f"[{camera_id}] Gagal update storage_manager: {e}")
 
                 else:
+                    storage_manager = getattr(self, "storage_manager", None)
+                    if storage_manager is not None:
+                        storage_manager.remove_camera(camera_id)
                     logger.warning(f"Camera {camera_id} not found or inactive — recorder not started")
 
     def get_status(self, camera_id: str = None) -> dict | bool:
@@ -158,3 +162,24 @@ class RecordingManager:
                 cam.status = status
                 cam.last_seen = datetime.now(timezone.utc) if status == "online" else None
                 await db.commit()
+
+    def record_error(self, camera_id: str, error: str):
+        self.last_errors.appendleft({
+            "camera_id": camera_id,
+            "error": error,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        })
+
+    def get_recording_status(self) -> dict:
+        status = {}
+        for camera_id, recorder in self.recorders.items():
+            status[camera_id] = {
+                "is_recording": recorder.is_alive,
+                "pid": recorder.recording_pid,
+                "last_segment": (
+                    recorder.segment_started_at.isoformat()
+                    if recorder.segment_started_at else None
+                ),
+                "error": recorder.last_error,
+            }
+        return status

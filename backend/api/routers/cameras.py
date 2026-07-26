@@ -12,6 +12,7 @@ from backend.api.schemas.camera import CameraCreate, CameraUpdate, CameraRespons
 from backend.api.middleware.auth import get_current_user, require_role
 from backend.db.models.user import User
 from backend.services.recorder.ffmpeg_wrapper import probe_stream
+from backend.services.audit import write_audit_log
 
 router = APIRouter(tags=["cameras"])
 
@@ -87,7 +88,7 @@ async def create_camera(
     body: CameraCreate,
     request: Request,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(require_role("admin")),
+    current_user: User = Depends(require_role("admin")),
 ):
     """Tambah kamera baru. Hanya admin ke atas.
     Setelah kamera dibuat, recording langsung distart tanpa perlu restart server.
@@ -111,6 +112,16 @@ async def create_camera(
         import logging
         logging.getLogger(__name__).warning(f"Kamera {body.id} dibuat tapi recorder gagal start: {e}")
 
+    await write_audit_log(
+        db,
+        action="camera.create",
+        user_id=current_user.id,
+        target_type="camera",
+        target_id=body.id,
+        detail={"name": body.name},
+        ip_address=request.client.host if request.client else None,
+    )
+
     return result
 
 
@@ -119,7 +130,7 @@ async def import_cameras(
     body: list[CameraCreate],
     request: Request,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(require_role("admin")),
+    current_user: User = Depends(require_role("admin")),
 ):
     """Import beberapa kamera sekaligus dari JSON array.
 
@@ -166,6 +177,15 @@ async def import_cameras(
                 await recording_manager.restart_camera(cam_data.id)
             except Exception as e:
                 errors.append({"id": cam_data.id, "error": f"Recorder gagal start: {e}"})
+            await write_audit_log(
+                db,
+                action="camera.create",
+                user_id=current_user.id,
+                target_type="camera",
+                target_id=cam_data.id,
+                detail={"source": "import", "name": cam_data.name},
+                ip_address=request.client.host if request.client else None,
+            )
 
         except Exception as e:
             errors.append({"id": cam_data.id, "error": str(e)})
@@ -186,7 +206,7 @@ async def update_camera(
     body: CameraUpdate,
     request: Request,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(require_role("admin")),
+    current_user: User = Depends(require_role("admin")),
 ):
     repo = CameraRepository(db)
     camera = await repo.get_by_id(camera_id)
@@ -205,6 +225,15 @@ async def update_camera(
         import logging
         logging.getLogger(__name__).warning(f"Update kamera {camera_id} OK, tapi recorder gagal restart: {e}")
 
+    await write_audit_log(
+        db,
+        action="camera.update",
+        user_id=current_user.id,
+        target_type="camera",
+        target_id=camera_id,
+        ip_address=request.client.host if request.client else None,
+    )
+
     return camera
 
 
@@ -213,7 +242,7 @@ async def delete_camera(
     camera_id: str,
     request: Request,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(require_role("admin")),
+    current_user: User = Depends(require_role("admin")),
 ):
     # Stop recorder sebelum hapus dari DB
     try:
@@ -221,6 +250,9 @@ async def delete_camera(
         if camera_id in recording_manager.recorders:
             await recording_manager.recorders[camera_id].stop()
             del recording_manager.recorders[camera_id]
+        storage_manager = getattr(recording_manager, "storage_manager", None)
+        if storage_manager is not None:
+            storage_manager.remove_camera(camera_id)
     except Exception:
         pass
 
@@ -228,6 +260,14 @@ async def delete_camera(
     deleted = await repo.delete_by_id(camera_id)
     if not deleted:
         raise HTTPException(status_code=404)
+    await write_audit_log(
+        db,
+        action="camera.delete",
+        user_id=current_user.id,
+        target_type="camera",
+        target_id=camera_id,
+        ip_address=request.client.host if request.client else None,
+    )
 
 
 @router.get("/{camera_id}/snapshot")

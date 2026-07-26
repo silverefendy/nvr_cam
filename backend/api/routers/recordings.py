@@ -8,7 +8,7 @@ from pathlib import Path
 import tempfile
 import os
 from fastapi import APIRouter, Depends, Query, HTTPException, Request, BackgroundTasks
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
@@ -19,11 +19,9 @@ from backend.db.repositories.camera_repo import CameraRepository
 from backend.db.models.recording import Recording
 from backend.api.middleware.auth import get_current_user, get_current_user_flexible, require_role
 from backend.db.models.user import User
-from backend.services.recorder.ffmpeg_wrapper import (
-    remux_for_streaming,
-    probe_codec_from_file,
-    transcode_to_h264,
-)
+from backend.services.recorder.ffmpeg_wrapper import probe_codec_from_file
+from backend.services.audit import write_audit_log
+from backend.services.transcode_queue import TranscodeQueue
 
 router = APIRouter(tags=["recordings"])
 
@@ -36,12 +34,20 @@ _remux_cache: dict[int, str] = {}
 async def list_recordings(
     camera_id: str | None = Query(None),
     date: str | None = Query(None),
+    start: datetime | None = Query(None),
+    end: datetime | None = Query(None),
     db: AsyncSession = Depends(get_db),
     _: User = Depends(get_current_user),
 ):
     """List rekaman. Tanpa filter: 500 terbaru."""
     repo = RecordingRepository(db)
-    if camera_id and date:
+    if start or end:
+        start_dt = start or datetime.min
+        end_dt = end or datetime.max
+        recordings = await repo.get_by_date_range(start_dt, end_dt)
+        if camera_id:
+            recordings = [r for r in recordings if r.camera_id == camera_id]
+    elif camera_id and date:
         try:
             date_obj = datetime.strptime(date, "%Y-%m-%d")
             recordings = await repo.get_by_camera_and_date(
@@ -202,7 +208,7 @@ async def play_recording(
             # Cache sudah dihapus (container restart)
             del _remux_cache[recording_id]
 
-    # --- Step 2: Probe codec + process jika belum ada di cache ---
+    # --- Step 2: Probe codec + queue processing jika belum ada di cache ---
     if serve_path == file_path:
         loop = __import__('asyncio').get_event_loop()
 
@@ -215,25 +221,22 @@ async def play_recording(
         tmp_dir.mkdir(exist_ok=True)
 
         if codec in ("hevc", "h265"):
-            # HEVC → transcode ke H.264
-            # File besar mungkin makan 2-10 menit — jalankan blocking karena
-            # kita perlu tunggu sampai selesai sebelum bisa serve ke browser
             tmp_file = tmp_dir / f"rec_{recording_id}_h264.mp4"
-            if not tmp_file.exists():
-                success = await loop.run_in_executor(
-                    None, transcode_to_h264, str(file_path), str(tmp_file)
-                )
-                if success:
-                    _remux_cache[recording_id] = str(tmp_file)
-                    serve_path = tmp_file
-                else:
-                    raise HTTPException(
-                        status_code=500,
-                        detail="Gagal transcode HEVC ke H.264. Cek log API untuk detail."
-                    )
-            else:
+            if tmp_file.exists():
                 _remux_cache[recording_id] = str(tmp_file)
                 serve_path = tmp_file
+            else:
+                queue = TranscodeQueue.get_instance()
+                queue.start()
+                job_id = queue.add_job(recording_id)
+                return JSONResponse(
+                    status_code=202,
+                    content={
+                        "job_id": job_id,
+                        "status": "queued",
+                        "status_url": f"/api/v1/recordings/{recording_id}/play/status?job_id={job_id}",
+                    },
+                )
 
         else:
             # H.264 atau codec lain — cek faststart
@@ -241,17 +244,21 @@ async def play_recording(
             if not is_faststart:
                 # Remux untuk pindahkan moov atom ke awal
                 tmp_file = tmp_dir / f"rec_{recording_id}.mp4"
-                if not tmp_file.exists():
-                    success = await loop.run_in_executor(
-                        None, remux_for_streaming, str(file_path), str(tmp_file)
-                    )
-                    if success:
-                        _remux_cache[recording_id] = str(tmp_file)
-                        serve_path = tmp_file
-                    # else: serve file asli, mungkin gagal di browser tapi tidak crash server
-                else:
+                if tmp_file.exists():
                     _remux_cache[recording_id] = str(tmp_file)
                     serve_path = tmp_file
+                else:
+                    queue = TranscodeQueue.get_instance()
+                    queue.start()
+                    job_id = queue.add_job(recording_id)
+                    return JSONResponse(
+                        status_code=202,
+                        content={
+                            "job_id": job_id,
+                            "status": "queued",
+                            "status_url": f"/api/v1/recordings/{recording_id}/play/status?job_id={job_id}",
+                        },
+                    )
             # else: H.264 + faststart → serve_path masih file_path, langsung serve
 
     # --- Step 3: Serve dengan Range support ---
@@ -285,6 +292,19 @@ async def play_recording(
         media_type="video/mp4",
         headers={"Accept-Ranges": "bytes"},
     )
+
+
+@router.get("/{recording_id}/play/status")
+async def play_recording_status(
+    recording_id: int,
+    job_id: str | None = Query(None),
+    _: User = Depends(get_current_user_flexible),
+):
+    queue = TranscodeQueue.get_instance()
+    status_data = queue.get_status(job_id) if job_id else queue.get_status_by_recording(recording_id)
+    if not status_data:
+        raise HTTPException(status_code=404, detail="Job playback tidak ditemukan")
+    return status_data
 
 
 def _check_faststart(file_path: Path) -> bool:
@@ -400,8 +420,9 @@ async def toggle_protect(
 @router.delete("/{recording_id}", status_code=204)
 async def delete_recording(
     recording_id: int,
+    request: Request,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(require_role("admin")),
+    current_user: User = Depends(require_role("admin")),
 ):
     repo = RecordingRepository(db)
     rec = await repo.get_by_id(recording_id)
@@ -417,3 +438,12 @@ async def delete_recording(
     except Exception:
         pass
     await repo.delete_by_id(recording_id)
+    await write_audit_log(
+        db,
+        action="recording.delete",
+        user_id=current_user.id,
+        target_type="recording",
+        target_id=str(recording_id),
+        detail={"camera_id": rec.camera_id, "file_path": rec.file_path},
+        ip_address=request.client.host if request.client else None,
+    )

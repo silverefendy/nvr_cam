@@ -96,17 +96,23 @@ Implementation notes:
 
 ### Wave 4 - Improve operations and observability
 
-1. Add runbooks.
-2. Add richer logs, request IDs, and service health surfaces.
-3. Add broader alerting.
-4. Add admin audit logs.
+1. [x] Add runbooks. (`docs/RUNBOOKS.md`, added 26 Juli 2026)
+2. [x] Add richer logs, request IDs, and service health surfaces.
+3. [ ] Add broader alerting.
+4. [x] Add admin audit logs.
 
 ### Wave 5 - Improve performance and UX
 
-1. Move playback processing out of request path.
-2. Add playback cache lifecycle management.
-3. Add transcode/motion scaling guardrails.
-4. Improve playback status UX and operator workflows.
+1. [x] Move playback processing out of request path.
+2. [x] Add playback cache lifecycle management.
+3. [x] Add transcode/motion scaling guardrails.
+4. [~] Improve playback status UX and operator workflows. Frontend delivered as PowerShell patch script for manual apply/build.
+
+## Update 26 Juli 2026
+
+- Wave 4 selesai untuk request ID, structured logs, richer health surface, audit logs, dan runbook dasar.
+- Wave 5 selesai untuk async playback queue, cache cleanup, motion/FFmpeg guardrail, dan backend date-range playback support.
+- Sisa utama ada di perluasan alerting dan verifikasi build frontend hasil `scripts/apply_frontend_s017.ps1`.
 
 ## Suggested Debt Policy
 

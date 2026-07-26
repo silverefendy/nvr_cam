@@ -12,6 +12,8 @@ logger = get_logger(__name__, service="motion")
 
 
 class MotionDetector:
+    _processing_semaphore = asyncio.Semaphore(8)
+
     def __init__(self, camera: dict, on_motion_callback):
         self.camera = camera
         self.camera_id = camera["id"]
@@ -49,9 +51,10 @@ class MotionDetector:
 
             small = cv2.resize(frame, (640, 360))
 
-            for zone in self.zones:
-                if self._detect_in_zone(small, zone):
-                    await self._trigger_event(zone, frame)
+            async with self._processing_semaphore:
+                for zone in self.zones:
+                    if self._detect_in_zone(small, zone):
+                        await self._trigger_event(zone, frame)
 
             await asyncio.sleep(0)  # yield ke event loop
 

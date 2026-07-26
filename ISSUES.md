@@ -217,17 +217,34 @@ git pull && docker compose up --build -d api
 | 3 | BUG-048: File 0MB sudah tidak muncul di UI | Buka halaman Playback, pastikan semua item punya ukuran file valid |
 | 4 | C-15/C-16: Sort & filter tabel Cameras | Klik header kolom Name → sort. Ketik "Pos" di search → filter |
 | 5 | C-17: Sort kamera di LiveView filter panel | Buka LiveView → Filter → coba tombol sort Name/Status |
+| 6 | BUG-051: Live View tidak crop di semua grid/floating mode | Jalankan `scripts/apply_frontend_s017.ps1`, buka Live View 2x2 dan 4x4, pastikan video `contain` dengan area hitam |
+| 7 | BUG-052: Kamera baru langsung terpetakan ke storage + recorder | Tambah kamera baru, cek `GET /api/v1/storage/diagnostics` dan pastikan `camera_drive_map` terisi |
+| 8 | BUG-053: HLS retry dan status loading tampil saat stream belum ready | Restart stream kamera, buka Live View, pastikan muncul "Menghubungkan... (mencoba ulang)" sebelum video tampil |
+| 9 | A-06: Profile + ganti password + reset password admin | Coba `/profile`, ganti password sendiri, lalu reset password user lain dari halaman Users |
 
 ---
+
+## Update Sesi #017 — 26 Juli 2026
+
+| ID | Bug/Fitur | Status |
+|----|-----------|--------|
+| BUG-051 | Live View video ter-crop karena `object-fit: cover` | ✅ Backend/frontend patch script siap |
+| BUG-052 | Storage mapping/recording tidak sinkron setelah tambah kamera baru | ✅ Fixed |
+| BUG-053 | Kamera online tapi Live View hitam saat HLS belum ready / FFmpeg error | ✅ Backend fixed + frontend patch script siap |
+| A-06 | Profile user + ganti password sendiri + reset password oleh admin | ✅ Backend fixed + frontend patch script siap |
+| A-08 | Audit log aktivitas admin/user | ✅ Fixed |
+| O-01 | Storage diagnostics endpoint | ✅ Done |
+| O-02 | Request ID + structured logging + richer health surface | ✅ Done |
+| O-03 | Async playback transcode queue + cache lifecycle management | ✅ Done |
 
 ## 🔲 Backlog Umum (Belum Dijadwalkan)
 
 ### Auth & User
 | ID | Issue | Status |
 |----|-------|--------|
-| A-06 | Ganti password sendiri | ⏳ |
+| A-06 | Ganti password sendiri / profile / reset password admin | ✅ |
 | A-07 | Two-Factor Authentication | ⏭️ nanti |
-| A-08 | Audit log aktivitas user | ⏳ |
+| A-08 | Audit log aktivitas user | ✅ |
 | A-09 | Session timeout auto logout | ⏳ |
 
 ### Kamera

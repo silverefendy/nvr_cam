@@ -23,6 +23,7 @@ from backend.db.models.camera import Camera
 from backend.db.repositories.camera_repo import CameraRepository
 from backend.services.notifier.telegram import TelegramNotifier
 from backend.services.notifier.email import EmailNotifier
+from backend.services.audit import write_audit_log
 from backend.utils.config_manager import config_manager
 
 import asyncio
@@ -61,6 +62,9 @@ async def _trigger_recorder_stop(camera_id: str):
         if camera_id in rm.recorders:
             await rm.recorders[camera_id].stop()
             rm.recorders.pop(camera_id, None)
+        storage_manager = getattr(rm, "storage_manager", None)
+        if storage_manager is not None:
+            storage_manager.remove_camera(camera_id)
     except Exception as e:
         import logging
         logging.getLogger(__name__).warning(f"[{camera_id}] Gagal stop recorder: {e}")
@@ -118,6 +122,7 @@ async def test_rtsp_connection_adhoc(
 @router.post("/cameras", response_model=ConfigResponse)
 async def create_camera_config(
     camera: CameraConfigCreate,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     _user=Depends(get_current_admin_user),
 ):
@@ -193,6 +198,15 @@ async def create_camera_config(
 
     # Schedule recorder start SETELAH response dikirim (background task)
     asyncio.create_task(_trigger_recorder_restart(camera_id))
+    await write_audit_log(
+        db,
+        action="camera.create",
+        user_id=_user.id,
+        target_type="camera",
+        target_id=camera_id,
+        detail={"source": "config", "name": created.name},
+        ip_address=request.client.host if request.client else None,
+    )
 
     return ConfigResponse(data={"camera": {"id": created.id, "name": created.name}})
 
@@ -201,6 +215,7 @@ async def create_camera_config(
 async def update_camera_config(
     camera_id: str,
     camera: CameraConfigUpdate,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     _user=Depends(get_current_admin_user),
 ):
@@ -250,6 +265,15 @@ async def update_camera_config(
 
     # Schedule recorder restart di background SETELAH commit
     asyncio.create_task(_trigger_recorder_restart(camera_id))
+    await write_audit_log(
+        db,
+        action="camera.update",
+        user_id=_user.id,
+        target_type="camera",
+        target_id=camera_id,
+        detail={"source": "config"},
+        ip_address=request.client.host if request.client else None,
+    )
 
     return ConfigResponse(data={"camera_id": camera_id})
 
@@ -257,6 +281,7 @@ async def update_camera_config(
 @router.delete("/cameras/{camera_id}", response_model=ConfigResponse)
 async def delete_camera_config(
     camera_id: str,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     _user=Depends(get_current_admin_user),
 ):
@@ -272,6 +297,15 @@ async def delete_camera_config(
 
     # Stop recorder di background
     asyncio.create_task(_trigger_recorder_stop(camera_id))
+    await write_audit_log(
+        db,
+        action="camera.delete",
+        user_id=_user.id,
+        target_type="camera",
+        target_id=camera_id,
+        detail={"source": "config"},
+        ip_address=request.client.host if request.client else None,
+    )
 
     return ConfigResponse(data={"camera_id": camera_id})
 
@@ -411,14 +445,25 @@ async def download_backup(_user=Depends(get_current_admin_user)):
 
 @router.post("/restore", response_model=ConfigResponse)
 async def restore_backup(
+    request: Request,
     file: UploadFile = File(...),
     _user=Depends(get_current_admin_user),
+    db: AsyncSession = Depends(get_db),
 ):
     zip_bytes = await file.read()
     try:
         await config_manager.restore_all(zip_bytes)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    await write_audit_log(
+        db,
+        action="config.restore",
+        user_id=_user.id,
+        target_type="config",
+        target_id="restore",
+        detail={"filename": file.filename},
+        ip_address=request.client.host if request.client else None,
+    )
     return ConfigResponse(data={"message": "Configuration restored successfully"})
 
 

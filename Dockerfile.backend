@@ -16,6 +16,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY backend/ ./backend/
 COPY config/ ./config/
+COPY scripts/ ./scripts/
 COPY .env.example .env
 
 # Salin alembic.ini ke /app dan sesuaikan script_location ke backend/db/migrations

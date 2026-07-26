@@ -48,6 +48,19 @@ class StorageManager:
         drives = set(self.camera_drive_map.values())
         return [self.get_drive_status(d) for d in drives if Path(d).exists()]
 
+    def update_camera_drive(self, camera_id: str, drive_path: str) -> None:
+        self.camera_drive_map[camera_id] = drive_path
+        logger.info(f"[STORAGE] camera_id={camera_id} mapped ke {drive_path}")
+
+    def get_drive_for_camera(self, camera_id: str) -> str | None:
+        drive = self.camera_drive_map.get(camera_id)
+        if not drive:
+            logger.warning(f"[STORAGE] camera_drive_map tidak ada entry untuk camera_id={camera_id}")
+        return drive
+
+    def remove_camera(self, camera_id: str) -> None:
+        self.camera_drive_map.pop(camera_id, None)
+
     def get_stats_by_camera(self) -> list[dict]:
         """
         Statistik penggunaan disk per kamera (F-08).

@@ -8,6 +8,7 @@ from backend.api.schemas.storage import DriveStatus
 from backend.db.base import AsyncSessionLocal
 from backend.db.repositories.camera_repo import CameraRepository
 from backend.db.models.user import User
+from backend.services.transcode_queue import TranscodeQueue
 
 router = APIRouter(tags=["storage"])
 
@@ -37,7 +38,7 @@ async def _get_effective_drives(request: Request) -> list[str]:
                     drives.add(cam.storage_drive)
                     # Sync ke storage_manager jika belum terdaftar
                     if storage_manager and cam.id not in storage_manager.camera_drive_map:
-                        storage_manager.camera_drive_map[cam.id] = cam.storage_drive
+                        storage_manager.update_camera_drive(cam.id, cam.storage_drive)
     except Exception:
         pass
     
@@ -160,6 +161,45 @@ async def get_storage_debug(request: Request, _: User = Depends(require_role("ad
         "effective_drives": effective_drives,
         "threshold_pct": storage_manager.threshold_pct,
         "drives": drive_info,
+    }
+
+
+@router.get("/diagnostics")
+async def get_storage_diagnostics(request: Request, _: User = Depends(require_role("admin"))):
+    storage_manager = request.app.state.storage_manager
+    recording_manager = request.app.state.recording_manager
+    await _get_effective_drives(request)
+
+    camera_drive_map = dict(storage_manager.camera_drive_map) if storage_manager else {}
+    drive_paths = sorted(set(camera_drive_map.values()))
+    drives = []
+    for drive_path in drive_paths:
+        path = Path(drive_path)
+        drive = {
+            "path": drive_path,
+            "exists": path.exists(),
+            "total_gb": 0,
+            "used_gb": 0,
+            "free_gb": 0,
+            "cameras_mapped": [
+                cam_id for cam_id, mapped_drive in camera_drive_map.items()
+                if mapped_drive == drive_path
+            ],
+        }
+        if path.exists():
+            usage = shutil.disk_usage(drive_path)
+            drive.update({
+                "total_gb": round(usage.total / (1024 ** 3), 2),
+                "used_gb": round(usage.used / (1024 ** 3), 2),
+                "free_gb": round(usage.free / (1024 ** 3), 2),
+            })
+        drives.append(drive)
+
+    return {
+        "camera_drive_map": camera_drive_map,
+        "drives": drives,
+        "recording_status": recording_manager.get_recording_status() if recording_manager else {},
+        "transcode_cache": TranscodeQueue.get_instance().cache_info(),
     }
 
 

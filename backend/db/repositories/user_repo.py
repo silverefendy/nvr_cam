@@ -2,7 +2,6 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from backend.db.models.user import User
-from backend.core.security import get_password_hash
 from .base_repo import BaseRepository
 
 
@@ -22,10 +21,10 @@ class UserRepository(BaseRepository[User]):
         )
         return result.scalars().all()
 
-    async def update_password(self, user_id: str, new_password: str) -> User:
+    async def update_password(self, user_id: str, new_hash: str) -> User | None:
         user = await self.get_by_id(user_id)
         if user:
-            user.password_hash = get_password_hash(new_password)
+            user.password_hash = new_hash
             await self.db.commit()
             await self.db.refresh(user)
         return user
