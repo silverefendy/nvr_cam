@@ -51,6 +51,7 @@ class Settings(BaseSettings):
     app_port: int = 8000
     log_level: str = "INFO"
     cors_allow_origins: str = LOCAL_CORS_ORIGINS
+    admin_password: str = ""
 
     @property
     def db_url(self) -> str:

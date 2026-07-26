@@ -77,10 +77,15 @@ Implementation notes:
 
 ### Wave 2 - Stabilize delivery
 
-1. Add CI pipeline.
-2. Fix stale tests.
-3. Add route-level auth/config/playback tests.
-4. Add smoke checks for Docker startup.
+1. [Done 2026-07-26] Add CI pipeline.
+2. [Done 2026-07-26] Fix stale tests.
+3. [Done 2026-07-26] Add route-level auth/config/playback tests.
+4. [Done 2026-07-26] Add Docker config/build/import smoke checks.
+
+Implementation notes:
+- GitHub Actions now runs backend tests, frontend build, YAML validation, Docker Compose config validation, Docker image builds, and backend container import smoke.
+- Local test script now runs the full backend test suite, frontend build, YAML validation, and Compose config smoke when Docker is usable.
+- Stale unit tests now import current `backend.*` modules and match current FFmpeg command behavior.
 
 ### Wave 3 - Clean up data and architecture
 

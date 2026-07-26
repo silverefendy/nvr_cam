@@ -1,7 +1,8 @@
 """Unit test untuk JWT dan password."""
 import pytest
-from services.auth.jwt_handler import create_access_token, decode_token
-from services.auth.password import hash_password, verify_password
+import jwt
+
+from backend.core.security import create_access_token, decode_token, hash_password, verify_password
 
 
 def test_jwt_encode_decode():
@@ -12,7 +13,8 @@ def test_jwt_encode_decode():
 
 
 def test_invalid_token():
-    assert decode_token("invalid.token.here") is None
+    with pytest.raises(jwt.PyJWTError):
+        decode_token("invalid.token.here")
 
 
 def test_password_hash_verify():
