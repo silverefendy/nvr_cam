@@ -40,16 +40,13 @@ def build_record_command(
         FFmpeg akan memindahkan moov atom ke awal file setelah segment selesai.
     """
     if force_h265:
-        # Transcode ke H.265: hemat storage ~50%, butuh lebih CPU
-        # -tag:v hvc1 agar QuickTime/Safari bisa putar
         video_args = [
             "-c:v", "libx265",
             "-preset", "fast",
-            "-crf", "28",          # 28 = kualitas bagus, file kecil
+            "-crf", "28",
             "-tag:v", "hvc1",
         ]
     else:
-        # Stream copy: tidak decode ulang, hemat CPU, ukuran = seperti kamera kirim
         video_args = ["-c:v", "copy"]
 
     return [
@@ -61,8 +58,6 @@ def build_record_command(
         "-f", "segment",
         "-segment_time", str(segment_seconds),
         "-segment_format", "mp4",
-        # FIX: movflags +faststart wajib agar browser bisa stream file MP4
-        # tanpa ini muncul: "No video with supported format and MIME type found"
         "-segment_format_options", "movflags=+faststart",
         "-segment_atclocktime", "1",
         "-reset_timestamps", "1",
@@ -147,7 +142,7 @@ def build_snapshot_command(rtsp_url: str, output_path: str) -> list[str]:
 def remux_for_streaming(input_path: str, output_path: str) -> bool:
     """
     Remux file MP4 agar moov atom ada di awal (faststart).
-    Dipakai untuk file lama yang direkam tanpa -movflags +faststart.
+    Dipakai untuk file H.264 lama yang direkam tanpa -movflags +faststart.
     Proses cepat: tidak decode ulang, hanya pindahkan metadata.
 
     Returns:
@@ -162,7 +157,7 @@ def remux_for_streaming(input_path: str, output_path: str) -> bool:
                 "-movflags", "+faststart",
                 "-y", output_path,
             ],
-            timeout=60,
+            timeout=300,  # 5 menit — lebih aman untuk file besar
             capture_output=True,
         )
         return result.returncode == 0
@@ -230,72 +225,14 @@ def transcode_to_h264(input_path: str, output_path: str) -> bool:
                 "ffmpeg", "-hide_banner", "-loglevel", "error",
                 "-i", input_path,
                 "-c:v", "libx264",
-                "-preset", "fast",   # fast = balance antara kecepatan dan ukuran
-                "-crf", "23",        # 23 = kualitas default ffmpeg, hasil bagus
+                "-preset", "fast",
+                "-crf", "23",
                 "-c:a", "aac",
                 "-b:a", "64k",
-                "-movflags", "+faststart",  # wajib agar browser bisa stream
+                "-movflags", "+faststart",
                 "-y", output_path,
             ],
-            timeout=600,  # 10 menit max untuk file 644 MB
-            capture_output=True,
-        )
-        return result.returncode == 0
-    except Exception:
-        return False
-
-
-def probe_codec_from_file(file_path: str) -> str | None:
-    """
-    Probe codec video dari file lokal (bukan RTSP stream).
-    Dipakai saat playback untuk cek apakah file perlu di-transcode.
-
-    Returns:
-        Nama codec lowercase: 'h264', 'hevc', 'av1', dll — atau None jika gagal.
-    """
-    try:
-        result = subprocess.run(
-            [
-                "ffprobe", "-v", "quiet", "-print_format", "json",
-                "-show_streams", file_path,
-            ],
-            capture_output=True, text=True, timeout=10,
-        )
-        if result.returncode == 0:
-            info = json.loads(result.stdout)
-            for stream in info.get("streams", []):
-                if stream.get("codec_type") == "video":
-                    return stream.get("codec_name")  # 'h264', 'hevc', dll
-    except Exception:
-        pass
-    return None
-
-
-def transcode_to_h264(input_path: str, output_path: str) -> bool:
-    """
-    Transcode file HEVC/H.265 ke H.264 MP4 agar bisa diputar di browser
-    via HTML5 <video> tag (Chrome/Firefox tidak support HEVC natively).
-
-    Proses ini memakan waktu untuk file besar — hasilnya di-cache di tmp_dir
-    agar tidak perlu transcode ulang setiap request playback.
-
-    Returns:
-        True jika berhasil, False jika gagal.
-    """
-    try:
-        result = subprocess.run(
-            [
-                "ffmpeg", "-hide_banner", "-loglevel", "error",
-                "-i", input_path,
-                "-c:v", "libx264",
-                "-preset", "fast",   # fast = balance antara kecepatan dan ukuran
-                "-crf", "23",        # 23 = kualitas default ffmpeg, hasil bagus
-                "-c:a", "aac",
-                "-b:a", "64k",
-                "-movflags", "+faststart",  # wajib agar browser bisa stream
-                "-y", output_path,
-            ],
-            timeout=600,  # 10 menit max untuk file 644 MB
+            timeout=1200,  # 20 menit max untuk file sangat besar (600MB+)
             capture_output=True,
         )
         return result.returncode == 0

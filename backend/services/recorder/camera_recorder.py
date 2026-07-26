@@ -1,5 +1,5 @@
 """
-CameraRecorder â€” satu instance per kamera.
+CameraRecorder — satu instance per kamera.
 Mengelola FFmpeg process untuk recording dan HLS streaming.
 
 Catatan implementasi:
@@ -12,12 +12,13 @@ Catatan implementasi:
   jika diperlukan.
 - Saat recorder di-restart (ganti IP/config), file HLS lama dibersihkan dulu
   agar FFmpeg baru tidak baca manifest stale yang referensikan segment lama.
+- File 0MB (rekaman gagal) dibersihkan otomatis setelah setiap segment selesai.
 """
 import asyncio
 from pathlib import Path
 from datetime import datetime, timezone
 from backend.core.logging import get_logger
-from .ffmpeg_wrapper import build_record_command, build_hls_command, detect_video_codec, probe_codec_from_file, probe_codec_from_file
+from .ffmpeg_wrapper import build_record_command, build_hls_command, detect_video_codec, probe_codec_from_file
 
 logger = get_logger(__name__, service="recorder")
 
@@ -37,7 +38,6 @@ class CameraRecorder:
         self.current_file: str | None = None
         self.started_at: datetime | None = None
         self._last_seen: datetime | None = None
-        # Waktu saat segment rekaman dimulai (beda dengan started_at yg di-set sekali)
         self._segment_started_at: datetime | None = None
 
     async def start(self):
@@ -45,8 +45,6 @@ class CameraRecorder:
         self.is_running = True
         self.started_at = datetime.now(timezone.utc)
 
-        # FIX: Validasi storage_drive sebelum mulai agar error terdeteksi lebih awal
-        # dan tidak loop reconnect diam-diam karena direktori tidak bisa dibuat.
         drive = self.camera.get("storage_drive", "")
         if not drive:
             logger.error(f"[{self.camera_id}] storage_drive kosong! Periksa konfigurasi kamera di DB.")
@@ -60,7 +58,6 @@ class CameraRecorder:
             )
             return
 
-        # Jalankan kedua loop secara concurrent tanpa blocking event loop
         await asyncio.gather(
             self._run_recording_loop(),
             self._run_hls_loop(),
@@ -86,7 +83,7 @@ class CameraRecorder:
     def _clear_hls_files(self, hls_dir: Path):
         """
         Hapus semua file HLS lama (*.ts dan index.m3u8) sebelum FFmpeg baru start.
-        Ini penting saat ganti IP/config â€” manifest lama mereferensikan
+        Ini penting saat ganti IP/config — manifest lama mereferensikan
         segment dari RTSP sebelumnya yang menyebabkan error di FFmpeg baru.
         """
         try:
@@ -97,16 +94,30 @@ class CameraRecorder:
         except Exception as e:
             logger.warning(f"[{self.camera_id}] Gagal bersihkan file HLS lama: {e}")
 
+    def _cleanup_empty_files(self, output_dir: Path):
+        """
+        FIX: Hapus file MP4 0MB (rekaman gagal) dari disk.
+        File 0MB terbentuk ketika FFmpeg crash/error sebelum write data apapun.
+        Jika tidak dibersihkan, file ini akan menumpuk di storage dan
+        muncul sebagai entry tanpa bisa diputar di halaman Playback.
+
+        Dipanggil setelah setiap segment selesai.
+        """
+        try:
+            cleaned = 0
+            for mp4_file in output_dir.glob("*.mp4"):
+                if mp4_file.stat().st_size < 1024:  # < 1KB = 0MB atau sangat kecil
+                    mp4_file.unlink(missing_ok=True)
+                    cleaned += 1
+            if cleaned > 0:
+                logger.info(f"[{self.camera_id}] Hapus {cleaned} file rekaman kosong dari {output_dir}")
+        except Exception as e:
+            logger.warning(f"[{self.camera_id}] Gagal cleanup file kosong: {e}")
+
     async def _save_recording_to_db(self, output_dir: Path, segment_started_at: datetime):
         """
-        FIX UTAMA: Simpan metadata rekaman yang baru selesai ke tabel recordings.
-
-        Sebelumnya fungsi ini tidak ada â€” FFmpeg menulis file ke disk tapi
-        tidak ada entry di DB, sehingga halaman rekaman selalu kosong.
-
-        Strategi: scan output_dir untuk file .mp4 yang belum terdaftar di DB,
-        lalu insert. Ini aman jika dipanggil berkali-kali (unique constraint
-        pada file_path mencegah duplikat).
+        Simpan metadata rekaman yang baru selesai ke tabel recordings.
+        File 0MB di-skip otomatis.
         """
         from backend.db.base import AsyncSessionLocal
         from backend.db.models.recording import Recording
@@ -122,14 +133,25 @@ class CameraRecorder:
                         select(Recording).where(Recording.file_path == str(mp4_file))
                     )
                     if existing.scalar_one_or_none() is not None:
-                        continue  # Sudah ada, skip
+                        continue
 
                     stat = mp4_file.stat()
-                    # File masih kosong / sedang ditulis â€” skip
+                    # File kosong / sedang ditulis — skip (akan dibersihkan oleh _cleanup_empty_files)
                     if stat.st_size < 1024:
                         continue
 
                     duration_s = int((ended_at - segment_started_at).total_seconds())
+
+                    # Probe codec aktual dari file
+                    loop = asyncio.get_event_loop()
+                    codec_name = await loop.run_in_executor(
+                        None, probe_codec_from_file, str(mp4_file)
+                    )
+                    if codec_name in ("hevc", "h265"):
+                        codec_str = "H265"
+                    else:
+                        codec_str = "H264"
+
                     rec = Recording(
                         camera_id=self.camera_id,
                         file_path=str(mp4_file),
@@ -137,7 +159,7 @@ class CameraRecorder:
                         started_at=segment_started_at,
                         ended_at=ended_at,
                         duration_s=max(0, duration_s),
-                        codec="H264",  # default; ffprobe jika diperlukan
+                        codec=codec_str,
                         is_protected=False,
                         is_encoded_av1=False,
                     )
@@ -162,30 +184,28 @@ class CameraRecorder:
                 cmd = build_record_command(self.camera["rtsp_main"], output_pattern)
                 logger.info(f"[{self.camera_id}] Mulai recording")
 
-                # Catat waktu mulai segment ini
                 self._segment_started_at = datetime.now(timezone.utc)
 
-                # asyncio.create_subprocess_exec â€” tidak blocking event loop
                 self._record_proc = await asyncio.create_subprocess_exec(
                     *cmd,
                     stdout=asyncio.subprocess.DEVNULL,
                     stderr=asyncio.subprocess.PIPE,
                 )
 
-                # Update status online
                 manager = RecordingManager.get_instance()
                 await manager.update_camera_status(self.camera_id, "online")
                 self._last_seen = datetime.now(timezone.utc)
 
-                # Tunggu FFmpeg selesai (non-blocking)
                 _, stderr_bytes = await self._record_proc.communicate()
                 if stderr_bytes:
                     last_err = stderr_bytes.decode(errors="replace").strip().splitlines()
                     if last_err:
                         logger.debug(f"[{self.camera_id}] FFmpeg stderr: {last_err[-1]}")
 
-                # FIX: Simpan metadata rekaman ke DB setelah FFmpeg selesai/putus.
-                # Ini yang sebelumnya tidak ada â€” penyebab halaman rekaman kosong.
+                # Cleanup file 0MB SEBELUM simpan ke DB
+                self._cleanup_empty_files(output_dir)
+
+                # Simpan metadata rekaman ke DB setelah FFmpeg selesai/putus
                 if self._segment_started_at:
                     await self._save_recording_to_db(output_dir, self._segment_started_at)
 
@@ -204,29 +224,15 @@ class CameraRecorder:
                     await asyncio.sleep(self._reconnect_delay)
 
     async def _run_hls_loop(self):
-        """Loop HLS streaming untuk live view browser.
-
-        Output ditulis ke /var/lib/nvr_cam/hls/<camera_id>_sub/
-        sesuai dengan naming yang diharapkan Nginx dan frontend.
-
-        Otomatis deteksi codec via ffprobe saat pertama start:
-        - HEVC/H.265 â†’ transcode ke H.264 (kompatibel hls.js di semua browser)
-        - H.264 â†’ stream copy (hemat CPU)
-
-        File HLS lama dibersihkan sebelum FFmpeg baru dijalankan untuk
-        menghindari konflik segment saat ganti IP/config kamera.
-        """
-        # Nama direktori harus cocok dengan yang diminta Nginx:
-        # /hls/cam_01_sub/index.m3u8 â†’ /var/lib/nvr_cam/hls/cam_01_sub/
+        """Loop HLS streaming untuk live view browser."""
         hls_dir = HLS_BASE_DIR / f"{self.camera_id}_sub"
         hls_dir.mkdir(parents=True, exist_ok=True)
 
         rtsp_url = self.camera.get("rtsp_sub") or self.camera["rtsp_main"]
 
-        # Bersihkan file HLS lama sebelum start â€” penting saat ganti IP/config
+        # Bersihkan file HLS lama sebelum start
         self._clear_hls_files(hls_dir)
 
-        # Probe codec sekali saat pertama loop â€” run_in_executor agar tidak block
         loop = asyncio.get_event_loop()
         codec = await loop.run_in_executor(None, detect_video_codec, rtsp_url)
         force_transcode = codec in ("hevc", "h265")
@@ -255,7 +261,6 @@ class CameraRecorder:
                     stderr=asyncio.subprocess.PIPE,
                 )
 
-                # Log stderr FFmpeg agar mudah debug
                 _, stderr_bytes = await self._hls_proc.communicate()
                 if stderr_bytes:
                     err_lines = stderr_bytes.decode(errors="replace").strip().splitlines()

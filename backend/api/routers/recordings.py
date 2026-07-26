@@ -19,11 +19,16 @@ from backend.db.repositories.camera_repo import CameraRepository
 from backend.db.models.recording import Recording
 from backend.api.middleware.auth import get_current_user, get_current_user_flexible, require_role
 from backend.db.models.user import User
-from backend.services.recorder.ffmpeg_wrapper import remux_for_streaming, probe_codec_from_file, transcode_to_h264, probe_codec_from_file, transcode_to_h264
+from backend.services.recorder.ffmpeg_wrapper import (
+    remux_for_streaming,
+    probe_codec_from_file,
+    transcode_to_h264,
+)
 
 router = APIRouter(tags=["recordings"])
 
-# Cache file yang sudah di-remux agar tidak proses ulang setiap request
+# Cache file yang sudah di-remux/transcode agar tidak proses ulang setiap request
+# key: recording_id, value: path ke file hasil remux/transcode
 _remux_cache: dict[int, str] = {}
 
 
@@ -59,7 +64,10 @@ async def list_recordings(
             raise HTTPException(status_code=400, detail="Format tanggal harus YYYY-MM-DD")
     else:
         recordings = await repo.get_recent(limit=500)
-    return recordings
+
+    # FIX: Filter rekaman dengan file_size_mb = 0 agar tidak muncul di UI
+    # File 0MB adalah file yang gagal direkam (FFmpeg crash sebelum write data)
+    return [r for r in recordings if (r.file_size_mb or 0) > 0]
 
 
 @router.post("/sync")
@@ -70,6 +78,7 @@ async def sync_recordings_from_disk(
     """
     Scan semua file .mp4 di storage dan daftarkan yang belum ada di DB.
     Berguna untuk rekaman lama sebelum patch atau setelah DB reset.
+    File 0MB otomatis diabaikan.
     """
     repo = CameraRepository(db)
     cameras = await repo.get_active_cameras()
@@ -104,9 +113,15 @@ async def sync_recordings_from_disk(
                 except ValueError:
                     started_at = datetime.fromtimestamp(stat.st_mtime)
 
+                # Probe codec aktual dari file
+                codec_name = probe_codec_from_file(str(mp4_file))
+                if codec_name in ("hevc", "h265"):
+                    codec_str = "H265"
+                else:
+                    codec_str = "H264"
+
                 # Estimasi durasi dari ukuran file (kasar)
                 size_mb = stat.st_size / (1024 * 1024)
-                # ~1MB per menit untuk H.264 720p, ~2MB untuk 1080p
                 estimated_duration_s = int(size_mb * 30)
 
                 rec = Recording(
@@ -116,7 +131,7 @@ async def sync_recordings_from_disk(
                     started_at=started_at,
                     ended_at=None,
                     duration_s=estimated_duration_s,
-                    codec="H264",
+                    codec=codec_str,
                     is_protected=False,
                     is_encoded_av1=False,
                 )
@@ -147,13 +162,20 @@ async def play_recording(
     """
     Stream file MP4 ke browser dengan Range header support.
 
-    FIX: File lama yang direkam tanpa -movflags +faststart tidak bisa
-    langsung di-stream browser karena moov atom ada di akhir file.
-    Solusi: remux on-the-fly ke file temp, lalu serve file temp tersebut.
-    File baru (setelah patch) sudah punya faststart jadi langsung jalan.
+    Pipeline:
+    1. Probe codec file (ffprobe) — cepat, hanya baca metadata
+    2. Jika HEVC/H.265 → transcode ke H.264 (cache di /tmp/nvr_remux/)
+    3. Jika H.264 tapi tidak faststart → remux copy (cepat, <1 menit)
+    4. Jika H.264 + faststart → serve langsung
+
+    Note:
+    - Transcode HEVC file besar (100MB+) bisa makan 2-10 menit pertama kali.
+      Request berikutnya serve dari cache.
+    - Cache hilang saat container restart → transcode ulang pertama kali.
+    - Token auth via query param ?token=... agar browser bisa akses URL video langsung.
     """
     repo = RecordingRepository(db)
-    rec  = await repo.get_by_id(recording_id)
+    rec = await repo.get_by_id(recording_id)
     if not rec:
         raise HTTPException(status_code=404)
 
@@ -161,29 +183,78 @@ async def play_recording(
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="File rekaman tidak ditemukan di disk")
 
-    # Cek apakah file sudah punya moov di awal (faststart)
-    # Cara cepat: baca 8 byte pertama dan cek apakah ada 'ftyp' atau 'moov'
+    # Tolak file 0MB — tidak ada data video yang bisa diputar
+    file_size_actual = file_path.stat().st_size
+    if file_size_actual < 1024:
+        raise HTTPException(
+            status_code=422,
+            detail="File rekaman kosong (0MB) — kemungkinan rekaman gagal dimulai"
+        )
+
     serve_path = file_path
-    is_faststart = _check_faststart(file_path)
 
-    if not is_faststart:
-        # File lama: cek cache dulu
-        if recording_id in _remux_cache and Path(_remux_cache[recording_id]).exists():
-            serve_path = Path(_remux_cache[recording_id])
+    # --- Step 1: Cek cache dulu ---
+    if recording_id in _remux_cache:
+        cached = Path(_remux_cache[recording_id])
+        if cached.exists():
+            serve_path = cached
         else:
-            # Remux ke file temp
-            tmp_dir = Path(tempfile.gettempdir()) / "nvr_remux"
-            tmp_dir.mkdir(exist_ok=True)
-            tmp_file = tmp_dir / f"rec_{recording_id}.mp4"
+            # Cache sudah dihapus (container restart)
+            del _remux_cache[recording_id]
 
+    # --- Step 2: Probe codec + process jika belum ada di cache ---
+    if serve_path == file_path:
+        loop = __import__('asyncio').get_event_loop()
+
+        # Probe codec file (non-blocking)
+        codec = await loop.run_in_executor(
+            None, probe_codec_from_file, str(file_path)
+        )
+
+        tmp_dir = Path(tempfile.gettempdir()) / "nvr_remux"
+        tmp_dir.mkdir(exist_ok=True)
+
+        if codec in ("hevc", "h265"):
+            # HEVC → transcode ke H.264
+            # File besar mungkin makan 2-10 menit — jalankan blocking karena
+            # kita perlu tunggu sampai selesai sebelum bisa serve ke browser
+            tmp_file = tmp_dir / f"rec_{recording_id}_h264.mp4"
             if not tmp_file.exists():
-                success = remux_for_streaming(str(file_path), str(tmp_file))
+                success = await loop.run_in_executor(
+                    None, transcode_to_h264, str(file_path), str(tmp_file)
+                )
                 if success:
                     _remux_cache[recording_id] = str(tmp_file)
                     serve_path = tmp_file
-                # else: serve file asli (mungkin gagal di browser tapi tidak crash server)
+                else:
+                    raise HTTPException(
+                        status_code=500,
+                        detail="Gagal transcode HEVC ke H.264. Cek log API untuk detail."
+                    )
+            else:
+                _remux_cache[recording_id] = str(tmp_file)
+                serve_path = tmp_file
 
-    # Serve dengan Range support
+        else:
+            # H.264 atau codec lain — cek faststart
+            is_faststart = _check_faststart(file_path)
+            if not is_faststart:
+                # Remux untuk pindahkan moov atom ke awal
+                tmp_file = tmp_dir / f"rec_{recording_id}.mp4"
+                if not tmp_file.exists():
+                    success = await loop.run_in_executor(
+                        None, remux_for_streaming, str(file_path), str(tmp_file)
+                    )
+                    if success:
+                        _remux_cache[recording_id] = str(tmp_file)
+                        serve_path = tmp_file
+                    # else: serve file asli, mungkin gagal di browser tapi tidak crash server
+                else:
+                    _remux_cache[recording_id] = str(tmp_file)
+                    serve_path = tmp_file
+            # else: H.264 + faststart → serve_path masih file_path, langsung serve
+
+    # --- Step 3: Serve dengan Range support ---
     file_size = serve_path.stat().st_size
     range_header = request.headers.get("range")
 
@@ -202,10 +273,10 @@ async def play_recording(
             data = f.read(chunk_size)
 
         headers = {
-            "Content-Range":  f"bytes {start}-{end}/{file_size}",
-            "Accept-Ranges":  "bytes",
+            "Content-Range": f"bytes {start}-{end}/{file_size}",
+            "Accept-Ranges": "bytes",
             "Content-Length": str(len(data)),
-            "Content-Type":   "video/mp4",
+            "Content-Type": "video/mp4",
         }
         return Response(data, status_code=206, headers=headers)
 
@@ -226,7 +297,6 @@ def _check_faststart(file_path: Path) -> bool:
             header = f.read(12)
         if len(header) < 8:
             return False
-        # Box type ada di byte 4-8
         box_type = header[4:8]
         return box_type in (b'ftyp', b'moov')
     except Exception:
@@ -240,7 +310,7 @@ async def download_recording(
     _: User = Depends(get_current_user),
 ):
     repo = RecordingRepository(db)
-    rec  = await repo.get_by_id(recording_id)
+    rec = await repo.get_by_id(recording_id)
     if not rec:
         raise HTTPException(status_code=404)
 
@@ -270,7 +340,7 @@ async def get_recording(
     _: User = Depends(get_current_user),
 ):
     repo = RecordingRepository(db)
-    rec  = await repo.get_by_id(recording_id)
+    rec = await repo.get_by_id(recording_id)
     if not rec:
         raise HTTPException(status_code=404)
     return rec
@@ -284,25 +354,25 @@ async def get_timeline(
     _: User = Depends(get_current_user),
 ):
     try:
-        date_obj  = datetime.strptime(date, "%Y-%m-%d")
-        date_from = date_obj.replace(hour=0,  minute=0,  second=0)
-        date_to   = date_obj.replace(hour=23, minute=59, second=59)
+        date_obj = datetime.strptime(date, "%Y-%m-%d")
+        date_from = date_obj.replace(hour=0, minute=0, second=0)
+        date_to = date_obj.replace(hour=23, minute=59, second=59)
     except ValueError:
         raise HTTPException(status_code=400, detail="Format tanggal harus YYYY-MM-DD")
 
     recording_repo = RecordingRepository(db)
-    recordings     = await recording_repo.get_by_camera_and_date(camera_id, date_from, date_to)
-    event_repo     = EventRepository(db)
-    events         = await event_repo.get_by_camera_and_date(camera_id, date_from, date_to)
+    recordings = await recording_repo.get_by_camera_and_date(camera_id, date_from, date_to)
+    event_repo = EventRepository(db)
+    events = await event_repo.get_by_camera_and_date(camera_id, date_from, date_to)
 
     timeline = []
     for hour in range(24):
-        hour_start = date_obj.replace(hour=hour, minute=0,  second=0)
-        hour_end   = date_obj.replace(hour=hour, minute=59, second=59)
+        hour_start = date_obj.replace(hour=hour, minute=0, second=0)
+        hour_end = date_obj.replace(hour=hour, minute=59, second=59)
         timeline.append({
-            "hour":          hour,
+            "hour": hour,
             "has_recording": any(hour_start <= r.started_at.replace(tzinfo=None) <= hour_end for r in recordings),
-            "has_motion":    any(hour_start <= e.started_at.replace(tzinfo=None) <= hour_end for e in events),
+            "has_motion": any(hour_start <= e.started_at.replace(tzinfo=None) <= hour_end for e in events),
         })
     return {
         "camera_id": camera_id, "date": date,
@@ -319,7 +389,7 @@ async def toggle_protect(
     _: User = Depends(require_role("operator")),
 ):
     repo = RecordingRepository(db)
-    rec  = await repo.get_by_id(recording_id)
+    rec = await repo.get_by_id(recording_id)
     if not rec:
         raise HTTPException(status_code=404)
     rec.is_protected = not rec.is_protected
@@ -334,14 +404,14 @@ async def delete_recording(
     _: User = Depends(require_role("admin")),
 ):
     repo = RecordingRepository(db)
-    rec  = await repo.get_by_id(recording_id)
+    rec = await repo.get_by_id(recording_id)
     if not rec:
         raise HTTPException(status_code=404)
     if rec.is_protected:
         raise HTTPException(status_code=400, detail="Rekaman dilindungi. Lepas proteksi dulu.")
     try:
         Path(rec.file_path).unlink(missing_ok=True)
-        # Hapus juga cache remux jika ada
+        # Hapus juga cache remux/transcode jika ada
         if recording_id in _remux_cache:
             Path(_remux_cache.pop(recording_id)).unlink(missing_ok=True)
     except Exception:
