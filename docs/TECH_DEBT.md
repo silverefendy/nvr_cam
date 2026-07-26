@@ -64,10 +64,16 @@ Semua backlog perbaikan, hardening, cleanup arsitektur, peningkatan UX, operasio
 
 ### Wave 1 - Secure the system
 
-1. Enforce playback auth.
-2. Enforce config restore auth.
-3. Block default production secrets.
-4. Replace wildcard CORS in production.
+1. [Done 2026-07-26] Enforce playback auth.
+2. [Done 2026-07-26] Enforce config restore auth and ZIP restore validation.
+3. [Done 2026-07-26] Block default production secrets and remove real-looking sample credentials.
+4. [Done 2026-07-26] Replace wildcard CORS with env-driven allowlist.
+
+Implementation notes:
+- Playback now validates bearer/query tokens through `get_current_user_flexible`.
+- Config restore requires admin auth and rejects unsafe ZIP entries.
+- Production startup rejects default DB/JWT secrets and wildcard CORS.
+- Initial admin seeding no longer uses a universal default password.
 
 ### Wave 2 - Stabilize delivery
 

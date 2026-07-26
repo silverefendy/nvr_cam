@@ -157,7 +157,7 @@ async def play_recording(
     request: Request,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
-    token: str | None = Query(None, alias="token"),
+    _: User = Depends(get_current_user_flexible),
 ):
     """
     Stream file MP4 ke browser dengan Range header support.

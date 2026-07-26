@@ -325,7 +325,7 @@ Rangkuman keputusan dari diskusi yang sudah disepakati, sebagai referensi implem
 | L-02 | 4 systemd services | ✅ | #007 | nvr-api, nvr-recorder, nvr-motion, nvr-encoder |
 | L-03 | Nginx reverse proxy config | ✅ | #007 | Serve frontend + proxy ke backend port 8000 |
 | L-04 | Alembic database migration | ✅ | #006 | Auto-run saat install |
-| L-05 | Seed admin user (setup_db.py) | ✅ | #001 | Login default: admin / nvr1234 |
+| L-05 | Seed admin user (setup_db.py) | ✅ | #001 | Password dari ADMIN_PASSWORD atau generated one-time password |
 | L-06 | Docker Compose (dev) | ✅ | #005 | `docker-compose.dev.yml` untuk development |
 | L-07 | HTTPS / SSL (Let's Encrypt) | ⏳ | — | Saat ini hanya HTTP |
 | L-08 | Health check endpoint publik | ⏳ | — | `/health` tanpa auth untuk monitoring eksternal |

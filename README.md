@@ -13,7 +13,7 @@ curl -fsSL https://raw.githubusercontent.com/silverefendy/nvr_cam/main/scripts/i
 ## Akses Setelah Install
 
 - **Web Dashboard:** `http://IP-SERVER` (dari jaringan lokal)
-- **Login default:** `admin` / `nvr1234`
+- **Login awal:** user `admin`; password diambil dari `ADMIN_PASSWORD` atau dibuat acak oleh `scripts/setup_db.py`
 - **API Docs:** `http://IP-SERVER/api/docs`
 
 ## Update Aplikasi

@@ -178,4 +178,4 @@ docker compose up --build -d
 | Runtime dir (native) | `/var/lib/nvr_cam/` (HLS + snapshots) |
 | Volume Docker (dev) | `hls_data` → `/var/lib/nvr_cam/hls`, `snapshot_data` |
 | Notifikasi | Telegram Bot + SMTP email |
-| Login default | `admin / nvr1234` (**ganti sebelum production!**) |
+| Login awal | User `admin`; password dari `ADMIN_PASSWORD` atau output acak `scripts/setup_db.py` |

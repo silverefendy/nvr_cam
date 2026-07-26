@@ -4,6 +4,8 @@ Setup database - create first admin user if none exists.
 Safe to run multiple times (idempotent).
 """
 import asyncio
+import os
+import secrets
 import sys
 from pathlib import Path
 
@@ -33,10 +35,12 @@ async def create_admin_user():
             print(f"✓ Admin user already exists: {existing_admin.username}")
             return
         
-        # Create default admin user
+        admin_password = os.getenv("ADMIN_PASSWORD") or secrets.token_urlsafe(18)
+
+        # Create initial admin user
         admin = User(
             username="admin",
-            password_hash=get_password_hash("nvr1234"),
+            password_hash=get_password_hash(admin_password),
             role="admin",
             full_name="System Administrator",
             email=None,
@@ -48,9 +52,9 @@ async def create_admin_user():
         
         print("✓ Created admin user:")
         print("  Username: admin")
-        print("  Password: nvr1234")
+        print(f"  Password: {admin_password}")
         print("  Role: admin")
-        print("\n⚠️  IMPORTANT: Change the default password after first login!")
+        print("\nIMPORTANT: Store this password securely and change it after first login.")
 
 
 async def main():

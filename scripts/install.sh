@@ -59,8 +59,12 @@ fi
 # ── 6. PostgreSQL ────────────────────────────────────────────
 log "Setup database PostgreSQL..."
 
-# Ambil password dari .env jika sudah ada, fallback ke default dev
-DB_PASSWORD=$(grep '^DB_PASSWORD=' .env | cut -d'=' -f2 || echo "devpassword123")
+# Ambil password dari .env. Production install tidak boleh fallback ke default.
+DB_PASSWORD=$(grep '^DB_PASSWORD=' .env | cut -d'=' -f2)
+if [ -z "$DB_PASSWORD" ] || [ "$DB_PASSWORD" = "ganti_ini_dengan_password_kuat" ]; then
+    error "DB_PASSWORD wajib diisi dengan nilai kuat di .env sebelum install."
+    exit 1
+fi
 
 # Buat user dan database jika belum ada
 sudo -u postgres psql -tc "SELECT 1 FROM pg_roles WHERE rolname='nvr_user'" \
@@ -117,7 +121,7 @@ echo ""
 echo "============================================"
 echo -e "  ${GREEN}Instalasi selesai!${NC}"
 echo -e "  Buka: ${GREEN}http://$SERVER_IP${NC}"
-echo "  Login: admin / nvr1234"
+echo "  Login: admin / password dari ADMIN_PASSWORD atau output scripts/setup_db.py"
 echo ""
 echo "  Cek status services:"
 echo "    systemctl status nvr-api"

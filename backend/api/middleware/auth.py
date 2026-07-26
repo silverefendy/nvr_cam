@@ -87,9 +87,10 @@ async def get_current_user_flexible(
     auth_header = request.headers.get("Authorization", "")
     if auth_header.startswith("Bearer "):
         token = auth_header[7:]
-    elif token_query:
-        token = token_query
     else:
+        token = token_query or request.query_params.get("token")
+
+    if not token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Token tidak ditemukan — pastikan sudah login",

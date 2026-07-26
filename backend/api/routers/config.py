@@ -410,9 +410,15 @@ async def download_backup(_user=Depends(get_current_admin_user)):
 
 
 @router.post("/restore", response_model=ConfigResponse)
-async def restore_backup(file: UploadFile = File(...)):
+async def restore_backup(
+    file: UploadFile = File(...),
+    _user=Depends(get_current_admin_user),
+):
     zip_bytes = await file.read()
-    await config_manager.restore_all(zip_bytes)
+    try:
+        await config_manager.restore_all(zip_bytes)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     return ConfigResponse(data={"message": "Configuration restored successfully"})
 
 

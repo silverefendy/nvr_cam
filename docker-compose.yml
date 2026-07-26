@@ -3,9 +3,9 @@
     image: postgres:16-alpine
     container_name: cctv_db
     environment:
-      POSTGRES_USER: ${DB_USER:-nvr_user}
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-devpassword123}
-      POSTGRES_DB: ${DB_NAME:-nvr_cam}
+      POSTGRES_USER: ${DB_USER:?DB_USER must be set}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD must be set}
+      POSTGRES_DB: ${DB_NAME:?DB_NAME must be set}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:

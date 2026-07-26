@@ -21,6 +21,7 @@ BACKUP_DIR.mkdir(parents=True, exist_ok=True)
 
 # Maximum number of backups to keep
 MAX_BACKUPS = 5
+RESTORE_ALLOWLIST = {"cameras.yaml", "system.yaml", "storage.yaml", ".env"}
 
 
 class ConfigManager:
@@ -199,6 +200,7 @@ class ConfigManager:
         async with self._lock:
             zip_buffer = tempfile.NamedTemporaryFile(suffix=".zip", delete=False)
             zip_path = Path(zip_buffer.name)
+            zip_buffer.close()
             with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
                 for yaml_file in ["cameras.yaml", "system.yaml", "storage.yaml"]:
                     filepath = CONFIG_DIR / yaml_file
@@ -215,19 +217,41 @@ class ConfigManager:
     async def restore_all(self, zip_bytes: bytes) -> None:
         """Restore config from ZIP backup."""
         async with self._lock:
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            pre_restore_backup = BACKUP_DIR / f"pre_restore_{timestamp}"
-            pre_restore_backup.mkdir(exist_ok=True)
-            for yaml_file in ["cameras.yaml", "system.yaml", "storage.yaml"]:
-                filepath = CONFIG_DIR / yaml_file
-                if filepath.exists():
-                    shutil.copy2(filepath, pre_restore_backup / yaml_file)
             zip_buffer = tempfile.NamedTemporaryFile(suffix=".zip", delete=False)
             zip_path = Path(zip_buffer.name)
+            zip_buffer.close()
             zip_path.write_bytes(zip_bytes)
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            pre_restore_backup = BACKUP_DIR / f"pre_restore_{timestamp}"
             try:
                 with zipfile.ZipFile(zip_path, "r") as zipf:
-                    zipf.extractall(CONFIG_DIR)
+                    for info in zipf.infolist():
+                        target_name = info.filename.replace("\\", "/")
+                        target_path = Path(target_name)
+                        is_symlink = (info.external_attr >> 16) & 0o170000 == 0o120000
+                        if (
+                            info.is_dir()
+                            or target_name not in RESTORE_ALLOWLIST
+                            or target_path.is_absolute()
+                            or ".." in target_path.parts
+                            or is_symlink
+                        ):
+                            raise ValueError(f"Unsafe backup entry: {info.filename}")
+
+                    pre_restore_backup.mkdir(exist_ok=True)
+                    for yaml_file in ["cameras.yaml", "system.yaml", "storage.yaml"]:
+                        filepath = CONFIG_DIR / yaml_file
+                        if filepath.exists():
+                            shutil.copy2(filepath, pre_restore_backup / yaml_file)
+
+                    for filename in RESTORE_ALLOWLIST:
+                        if filename in zipf.namelist():
+                            data = zipf.read(filename)
+                            target = (CONFIG_DIR / filename).resolve()
+                            config_root = CONFIG_DIR.resolve()
+                            if target.parent != config_root:
+                                raise ValueError(f"Unsafe restore target: {filename}")
+                            target.write_bytes(data)
             finally:
                 zip_path.unlink()
 
