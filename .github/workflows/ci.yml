@@ -66,6 +66,9 @@ jobs:
       - name: Prepare CI env file
         run: cp .env.example .env
 
+      - name: Install PyYAML
+        run: python -m pip install pyyaml
+
       - name: Validate YAML config
         run: |
           python - <<'PY'
