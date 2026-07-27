@@ -1,8 +1,8 @@
 # HANDOFF — nvr_cam
 ## Status Proyek + Issue Tracker (Dokumen Tunggal untuk Claude Baru)
 
-**Terakhir diperbarui:** 27 Juli 2026  
-**Sesi Terakhir:** #018 (Login UI, Role Matrix, Settings Redesign, Storage Drive, Dual-stream, Snapshot, Schedules, Camera Groups)  
+**Terakhir diperbarui:** 27 Juli 2026 (Sesi #020)
+**Sesi Terakhir:** #020 (Discovery ONVIF scan, Alembic migration crash loop)
 **Repo:** https://github.com/silverefendy/nvr_cam
 
 ---
@@ -13,19 +13,24 @@
 Repo nvr_cam: https://github.com/silverefendy/nvr_cam
 Akses via MCP GitHub. Baca file ini sebelum mulai: docs/HANDOFF.md
 
-Progress per 27 Juli 2026 (Sesi #018 selesai):
+Progress per 27 Juli 2026 (Sesi #020 selesai):
 - Backend:     ✅ SELESAI (11 router, semua services, Python import passing)
 - Frontend:    ✅ SELESAI (npm run build SUCCESS, Tailwind fix sudah include)
 - Flutter:     🟡 Code ada, flutter analyze belum diverifikasi
 - Deploy:      ✅ scripts/install.sh siap untuk native Ubuntu
-- Docker mode: ✅ Berjalan normal
+- Docker mode: 🔴 API container CRASH LOOP — migration 003 setengah jalan (lihat BUG-055)
 - Live View:   ✅ Grid selector, fullscreen, PiP, toggle stream, drag-drop, filter, floating mode, sort filter
 - Playback:    ✅ Auth token fix, HEVC transcode, file >100MB bisa diputar, file 0MB tidak muncul
 - Cameras:     ✅ Sort per kolom, filter search + dropdown status
+- Discovery:   🔴 Belum bisa ditest — API crash loop dulu harus diselesaikan
 
 Stack: FastAPI (Python 3.12) + PostgreSQL 16 + React/Vite (TypeScript) + Flutter
 Server: Ubuntu Server 24.04, Intel i5, 8x WD Purple 4TB ZFS
 Kamera: 30x Dahua H.265 RTSP
+
+MASALAH AKTIF YANG HARUS DISELESAIKAN DULU:
+  → BUG-055: API container crash loop karena migration 003 setengah jalan
+    Fix: lihat bagian "Issue Tracker" di bawah
 
 Next task: [sebutkan apa yang mau dikerjakan]
 
@@ -42,15 +47,31 @@ Dokumen penting:
 
 | Layer | Status | Catatan |
 |-------|--------|----------|
-| Backend | ✅ **SELESAI** | 11 router, semua services, Python import passing |
+| Backend | 🔴 **CRASH LOOP** | Migration 003 setengah jalan — lihat BUG-055 |
 | Frontend | ✅ **SELESAI** | `npm run build` SUCCESS |
 | Mobile Flutter | 🟡 **Code Ada** | `flutter analyze` belum diverifikasi |
 | Deploy Scripts | ✅ **SIAP** | `scripts/install.sh` untuk native Ubuntu |
-| Docker Dev Mode | ✅ **BERJALAN** | Live View ✅, Playback ✅ (termasuk HEVC + file >100MB) |
+| Docker Dev Mode | 🔴 **API DOWN** | Harus fix BUG-055 dulu sebelum bisa lanjut apapun |
 
 ---
 
 ## Yang Selesai per Sesi
+
+### Sesi #020 — 27 Juli 2026 (Malam)
+
+| ID | Item | Status |
+|----|------|--------|
+| BUG-055 | API crash loop — Alembic migration 003 setengah jalan (DROP TABLE gagal tanpa CASCADE) | 🔴 **Ditemukan, belum di-fix** |
+| DEBUG | Discovery endpoint `POST /api/v1/discovery/cameras` return 404 — container masih image lama | 🔴 **Ditemukan — tertutup oleh BUG-055** |
+| DEBUG | `onvif-zeep` tidak terinstall di container — tapi tidak relevan karena `onvif_scanner.py` tidak pakai library ini (pakai `aiohttp` + WS-Discovery UDP manual) | ✅ Temuan — bukan bug |
+
+### Sesi #019 — 27 Juli 2026 (Siang)
+
+| ID | Fitur / Fix | File | Status |
+|----|-------------|------|--------|
+| G-06 | Discovery kamera ONVIF — tombol "🔍 Cari Kamera" tidak muncul di UI | `Cameras/index.tsx` | ✅ Fixed (rebuild frontend) |
+| BUG-TS-1 | TypeScript error `Cameras/index.tsx` baris 252 — `<DiscoveryModal>` di luar wrapper `<div>` | `Cameras/index.tsx` | ✅ Fixed |
+| BUG-TS-2 | TypeScript error `DiscoveryModal.tsx` — `useMutation` unused + `buildRtspMain` unused | `DiscoveryModal.tsx` | ✅ Fixed |
 
 ### Sesi #018 — 26 Juli 2026 (Malam)
 
@@ -66,8 +87,8 @@ Dokumen penting:
 
 ### Sesi #017 — 26 Juli 2026
 
-| ID | Fitur / Fix | Status |
-|----|-------------|--------|
+| ID | Bug | Fix |
+|----|-----|-----|
 | BUG-051 | Live View video ter-crop (`object-fit: cover`) | ✅ Backend/frontend patch siap |
 | BUG-052 | Storage mapping tidak sinkron setelah tambah kamera | ✅ Fixed |
 | BUG-053 | Live View hitam saat HLS belum ready | ✅ Fixed |
@@ -151,7 +172,7 @@ Serve dengan Range header support (206 Partial Content)
 ```bash
 docker compose up --build -d
 # Akses: http://localhost:3000 (frontend), http://localhost:8000 (API)
-docker exec cctv_api alembic upgrade head
+docker compose exec api alembic -c backend/alembic.ini upgrade head
 docker exec cctv_api python scripts/setup_db.py
 ```
 
@@ -191,24 +212,96 @@ systemctl status nvr-api nvr-recorder nvr-motion nvr-encoder
 
 ## Issue Tracker & Backlog
 
-### ❓ Yang Masih Perlu Diverifikasi
+### 🔴 KRITIS — Harus Diselesaikan Sekarang
+
+#### BUG-055: API Container Crash Loop — Alembic Migration 003 Setengah Jalan
+
+**Gejala:** Container `cctv_api` restart terus, error di log:
+```
+DROP TABLE motion_events_old;
+ERROR: default value for column id ... depends on sequence motion_events_id_seq
+HINT: Use DROP ... CASCADE
+```
+
+**Root cause:** Migration `20260727_000003_partition_recordings_and_events.py` gagal di step terakhir.
+Timeline eksekusi migration:
+- ✅ `RENAME motion_events → motion_events_old`
+- ✅ `RENAME recordings → recordings_old`
+- ✅ `CREATE TABLE recordings (PARTITIONED)`
+- ✅ `CREATE TABLE motion_events (PARTITIONED)` + semua child partitions
+- ✅ `INSERT INTO recordings ... SELECT FROM recordings_old` (copy data)
+- ✅ `INSERT INTO motion_events ... SELECT FROM motion_events_old` (copy data)
+- ❌ `DROP TABLE motion_events_old` ← **GAGAL** karena sequence dependency
+- ❌ `DROP TABLE recordings_old` ← tidak sempat dieksekusi
+
+**State DB sekarang:** Partitioned tables sudah ada + terisi data. Tapi `motion_events_old` dan `recordings_old` masih ada di DB.
+
+**Fix — jalankan step ini berurutan:**
+
+```powershell
+# Step 1: Drop tabel lama yang nyangkut
+docker compose exec postgres psql -U nvr_user -d nvr_db -c "DROP TABLE IF EXISTS motion_events_old CASCADE;"
+docker compose exec postgres psql -U nvr_user -d nvr_db -c "DROP TABLE IF EXISTS recordings_old CASCADE;"
+
+# Step 2: Stamp Alembic supaya tidak re-run migration 003
+docker compose run --rm api alembic -c backend/alembic.ini stamp 003
+
+# Step 3: Restart API
+docker compose up -d api
+
+# Step 4: Verifikasi — tunggu 15 detik lalu cek log
+Start-Sleep 15
+docker compose logs api --tail 20
+```
+
+**Fix permanen di code** (agar tidak terjadi lagi):
+```powershell
+# Buat fix.py lalu jalankan
+Set-Content -Path fix.py -Value @'
+path = "backend/db/migrations/versions/20260727_000003_partition_recordings_and_events.py"
+with open(path, "r", encoding="utf-8") as f:
+    content = f.read()
+content = content.replace(
+    'op.execute("DROP TABLE motion_events_old;")',
+    'op.execute("DROP TABLE IF EXISTS motion_events_old CASCADE;")'
+)
+content = content.replace(
+    'op.execute("DROP TABLE recordings_old;")',
+    'op.execute("DROP TABLE IF EXISTS recordings_old CASCADE;")'
+)
+with open(path, "w", encoding="utf-8") as f:
+    f.write(content)
+print("Done.")
+'@
+python fix.py
+```
+
+**Status:** Belum di-fix — menunggu eksekusi.
+
+---
+
+### ❓ Yang Masih Perlu Diverifikasi (setelah BUG-055 selesai)
 
 | # | Item | Cara Verifikasi |
 |---|------|-----------------|
-| 1 | BUG-032: 403 di `/api/v1/config/system` | `SELECT username, role FROM users;` di DB |
-| 2 | BUG-047: Playback file >100MB bisa diputar | Buka halaman Playback, klik file >100MB |
-| 3 | BUG-048: File 0MB tidak muncul di UI | Buka Playback, semua item harus punya ukuran valid |
-| 4 | BUG-051: Live View video tidak ter-crop | Jalankan `scripts/apply_frontend_s017.ps1`, buka grid 2x2 dan 4x4 |
-| 5 | BUG-052: Kamera baru langsung terpetakan ke storage | Tambah kamera, cek `GET /api/v1/storage/diagnostics` |
-| 6 | BUG-053: HLS retry loading indicator muncul | Restart stream kamera, buka Live View |
-| 7 | A-06: Profile + ganti password + reset admin | Coba `/profile`, ganti password, reset user lain dari Users |
-| 8 | C-15/C-16: Sort & filter tabel Cameras | Klik header kolom Name → sort. Ketik di search → filter |
-| 9 | C-17: Sort kamera di LiveView filter panel | Buka LiveView → Filter → tombol sort Name/Status |
+| 1 | Discovery scan ONVIF — hasil "Not Found" di UI | Setelah API up: test via Swagger `http://localhost:8000/api/docs` → POST `/api/v1/discovery/cameras` |
+| 2 | cam_03 — 403 Forbidden terus | Edit cam_03 di halaman Cameras → update credentials RTSP yang benar |
+| 3 | cam_02 — Connection refused | Cek apakah kamera online / IP berubah |
+| 4 | BUG-032: 403 di `/api/v1/config/system` | `SELECT username, role FROM users;` di DB |
+| 5 | BUG-047: Playback file >100MB bisa diputar | Buka halaman Playback, klik file >100MB |
+| 6 | BUG-048: File 0MB tidak muncul di UI | Buka Playback, semua item harus punya ukuran valid |
+| 7 | BUG-051: Live View video tidak ter-crop | Jalankan `scripts/apply_frontend_s017.ps1`, buka grid 2x2 dan 4x4 |
+| 8 | BUG-052: Kamera baru langsung terpetakan ke storage | Tambah kamera, cek `GET /api/v1/storage/diagnostics` |
+| 9 | BUG-053: HLS retry loading indicator muncul | Restart stream kamera, buka Live View |
+| 10 | A-06: Profile + ganti password + reset admin | Coba `/profile`, ganti password, reset user lain dari Users |
+| 11 | C-15/C-16: Sort & filter tabel Cameras | Klik header kolom Name → sort. Ketik di search → filter |
+| 12 | C-17: Sort kamera di LiveView filter panel | Buka LiveView → Filter → tombol sort Name/Status |
 
 ### 🔴 Prioritas Tinggi
 
 | ID | Task | Catatan |
 |----|------|---------|
+| — | **Fix BUG-055 dulu** sebelum apapun | API tidak bisa jalan |
 | — | Verifikasi semua item di tabel atas | Terutama BUG-051, 052, 053 dan A-06 |
 | F-08 | Statistik storage per kamera | Berapa GB per kamera per hari |
 | F-09 | Jadwal cleanup terjadwal | Cleanup rutin, bukan hanya saat disk penuh |
@@ -271,6 +364,18 @@ systemctl status nvr-api nvr-recorder nvr-motion nvr-encoder
 
 ---
 
+## Tips Debug API
+
+| Cara | Keterangan |
+|------|-----------|
+| **Swagger UI** | `http://localhost:8000/api/docs` — test endpoint langsung via browser, ada tombol Authorize untuk paste JWT |
+| **ReDoc** | `http://localhost:8000/api/redoc` — dokumentasi semua endpoint |
+| **PowerShell curl** | `Invoke-RestMethod -Method POST -Uri "..." -Headers @{Authorization="Bearer $TOKEN"} -Body '...'` |
+| **httpie** | `pip install httpie` lalu `http POST localhost:8000/api/v1/... Authorization:"Bearer $TOKEN"` |
+| **Postman/Insomnia** | Import dari Swagger URL untuk test GUI yang lebih lengkap |
+
+---
+
 ## Timeline Sesi Development
 
 | No | Tanggal | Sesi | Agent | Yang Dikerjakan |
@@ -291,7 +396,8 @@ systemctl status nvr-api nvr-recorder nvr-motion nvr-encoder
 | 15 | 26 Juli 2026 | #016 | Claude | Fitur C-15, C-16, C-17 (sort & filter Cameras + LiveView) |
 | 16 | 26 Juli 2026 | #017 | Claude | Async queue, diagnostics, structured logs, audit logs, health |
 | 17 | 26 Juli 2026 | #018 | Claude | Login UI fix, role matrix, settings redesign, dual-stream, snapshot, schedule, camera groups |
-| 18 | 27 Juli 2026 | #019 | Claude | Audit menyeluruh, konsolidasi docs, cleanup root |
+| 18 | 27 Juli 2026 | #019 | Claude | Discovery UI fix (tombol muncul, TypeScript error) |
+| 19 | 27 Juli 2026 | #020 | Claude | Debug discovery scan + temukan BUG-055 (migration 003 crash loop) |
 
 ---
 
