@@ -197,6 +197,25 @@ git pull && docker compose up --build -d api
 
 ---
 
+## 🎨 Fitur Sesi #018 — Login UI, Role Matrix, Settings Redesign, Storage drive, Dual-stream, Snapshot, Schedules, Camera Groups
+
+> **Tanggal:** 26 Juli 2026, 23:59 WIB
+> **Scope:** Tampilan Login Page Fix (BUG-054), Role Matrix & Permissions System (A-10), Storage Drive Fix (BUG-052), Settings Redesign, Dual Stream Support, Manual Snapshot (E-14), Scheduled Recording (E-15), Camera Group/Tag (B-13).
+
+### Fitur Baru & Bug Fixes
+
+| ID | Fitur / Bug | File | Status |
+|----|-------------|------|--------|
+| BUG-054 | Login styling tidak muncul | `frontend/tailwind.config.js`, `frontend/postcss.config.js` | ✅ Fixed |
+| A-10 | Role permission matrix lengkap | `auth.py`, `dependencies.py` | ✅ Done |
+| BUG-052 | Storage drive fix | `docker-compose.yml`, `storage.yaml`, `storage.py` | ✅ Fixed |
+| E-14 | Snapshot manual | `cameras.py` | ✅ Done |
+| E-15 | Scheduled recording | `camera_recorder.py` | ✅ Done |
+| B-13 | Camera group/tag | `camera_groups.py` | ✅ Done |
+| Settings | Pengaturan global system | `settings.py` | ✅ Done |
+
+---
+
 ## 🎯 Batch Status
 
 | Batch | Fitur | Status |

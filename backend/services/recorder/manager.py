@@ -26,12 +26,18 @@ def _camera_to_dict(cam) -> dict:
         "location": cam.location,
         "rtsp_main": cam.rtsp_main,
         "rtsp_sub": cam.rtsp_sub,
+        "rtsp_url_main": cam.rtsp_url_main,
+        "rtsp_url_sub": cam.rtsp_url_sub,
         "storage_drive": cam.storage_drive,
         "motion_enabled": cam.motion_enabled,
         "retention_days": cam.retention_days,
         "segment_duration": config_extra.get("segment_duration", 3600),
         "is_active": cam.is_active,
         "config_json": cam.config_json,
+        "recording_schedule": cam.recording_schedule,
+        "schedule_start_time": cam.schedule_start_time,
+        "schedule_end_time": cam.schedule_end_time,
+        "schedule_days": cam.schedule_days,
     }
 
 

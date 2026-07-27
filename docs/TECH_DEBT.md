@@ -89,10 +89,14 @@ Implementation notes:
 
 ### Wave 3 - Clean up data and architecture
 
-1. Reconcile `segment_duration`.
+1. [Done 2026-07-26] Reconcile `segment_duration`.
 2. Reconcile cleanup with DB metadata.
-3. Define config source of truth.
-4. Remove or finish duplicate settings surface.
+3. [Done 2026-07-26] Define config source of truth.
+4. [Done 2026-07-26] Remove or finish duplicate settings surface.
+
+Implementation notes:
+- Reconciled dual-stream RTSP, schedule, and groups schema in database and models.
+- Finished settings router, cleanly saving site configuration under `system.yaml`.
 
 ### Wave 4 - Improve operations and observability
 
@@ -113,6 +117,14 @@ Implementation notes:
 - Wave 4 selesai untuk request ID, structured logs, richer health surface, audit logs, dan runbook dasar.
 - Wave 5 selesai untuk async playback queue, cache cleanup, motion/FFmpeg guardrail, dan backend date-range playback support.
 - Sisa utama ada di perluasan alerting dan verifikasi build frontend hasil `scripts/apply_frontend_s017.ps1`.
+
+## Update Sesi #018 — 26 Juli 2026 (Malam)
+
+- Selesai integrasi lengkap Dual Stream (rtsp_url_main / rtsp_url_sub), camera groups, scheduling per kamera, dan manual snapshot.
+- Settings page backend router sudah diganti dari placeholder dan diimplementasikan komprehensif, menyimpan langsung ke `system.yaml` via ConfigManager.
+- Mengatasi build Tailwind CSS di frontend (BUG-054) dengan menambahkan tailwind.config.js dan postcss.config.js.
+- Menyinkronkan volume docker-compose ke `./recordings:/mnt/driveA` dan menambahkan endpoints manajemen drive storage (GET, POST, DELETE, PUT assign) yang super_admin only.
+- Menambahkan test integration backend baru (`test_sesi018_features.py`) untuk memverifikasi role permissions dan kamera grup.
 
 ## Suggested Debt Policy
 

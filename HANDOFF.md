@@ -1,8 +1,8 @@
 # HANDOFF DOCUMENT — nvr_cam
 ## Panduan Melanjutkan Development di Sesi Baru
 
-**Terakhir diperbarui:** 26 Juli 2026, 23:45 WIB
-**Sesi Terakhir:** #017 (Codex — bug fixes + observability + playback queue)
+**Terakhir diperbarui:** 26 Juli 2026, 23:59 WIB
+**Sesi Terakhir:** #018 (Jules — Login UI, Role Matrix, Settings Redesign, Storage drive, Dual-stream, Snapshot, Schedules, Camera Groups)
 **Repo:** https://github.com/silverefendy/nvr_cam
 
 ---
@@ -47,6 +47,19 @@ Next task: [sebutkan apa yang mau dikerjakan]
 | Docker Dev Mode | ✅ **BERJALAN** | Live View ✅, Playback ✅ (termasuk HEVC + file >100MB) |
 
 ---
+
+## Yang Baru Selesai di Sesi #018
+
+| Fitur / Fix | File | Keterangan |
+|---|---|---|
+| BUG-054 Login Page Tampilan | `frontend/tailwind.config.js`, `frontend/postcss.config.js` | Tailwind CSS tidak diload karena ketiadaan file konfigurasi. Penambahan dua file config ini menyelesaikan build pipeline Tailwind. Login page diubah menjadi text-3xl font-bold. |
+| A-10 Role Matrix & Permissions | `auth.py`, `dependencies.py` | Implementasi dependencies `get_current_super_admin`, `get_current_admin_user`, `get_current_operator_user` dan fungsi helper `has_permission` berdasarkan matrix permission lengkap. |
+| BUG-052 Storage Drive Fix | `docker-compose.yml`, `storage.yaml`, `storage.py` | Sync volume mount ke `./recordings:/mnt/driveA`, setup storage.yaml ke `/mnt/driveA`, membuat folder `recordings/.gitkeep`, dan membuat endpoint CRUD manajemen drive storage (super_admin only). |
+| Settings Redesign | `settings.py` | Mengganti placeholder routing settings menjadi API komprehensif (general, recording, notification, streaming, test telegram/email) yang menyimpan langsung ke `config/system.yaml` via ConfigManager. |
+| Dual Stream Support | `camera.py`, `cameras.py`, `stream.py`, `camera_recorder.py` | Menambahkan kolom `rtsp_url_main` dan `rtsp_url_sub` ke DB (idempotent migration) dan setup fallback routing live view/HLS/recording. |
+| Snapshot Manual | `cameras.py` | Membuat endpoint POST manual snapshot via FFmpeg ke `/var/lib/nvr_cam/snapshots/{camera_id}_{timestamp}.jpg`, GET listing snapshots, dan DELETE snapshot. |
+| Scheduled Recording | `camera.py`, `camera_recorder.py` | Menambahkan kolom schedule ke DB, dan mengimplementasikan loop scheduler otomatis di `camera_recorder.py` untuk menghentikan/memulai perekaman. |
+| Camera Group / Tag | `camera_group.py`, `camera_groups.py` | Menambahkan tabel `camera_groups` ke DB, dan mengimplementasikan CRUD endpoints manajemen grup kamera. |
 
 ## Yang Baru Selesai di Sesi #016
 

@@ -211,17 +211,66 @@ class CameraRecorder:
         except Exception as e:
             logger.error(f"[{self.camera_id}] Gagal simpan rekaman ke DB: {e}")
 
+    def is_within_schedule(self) -> bool:
+        """Cek apakah saat ini berada dalam jadwal perekaman."""
+        schedule_type = self.camera.get("recording_schedule", "24h")
+        if schedule_type == "24h":
+            return True
+
+        now = datetime.now()
+        current_day = str(now.weekday() + 1)  # Mon=1, Sun=7
+
+        allowed_days = self.camera.get("schedule_days")
+        if allowed_days:
+            allowed_days_list = [d.strip() for d in allowed_days.split(",") if d.strip()]
+            if current_day not in allowed_days_list:
+                return False
+
+        start_str = self.camera.get("schedule_start_time")
+        end_str = self.camera.get("schedule_end_time")
+        if start_str and end_str:
+            try:
+                start_time = datetime.strptime(start_str.strip(), "%H:%M").time()
+                end_time = datetime.strptime(end_str.strip(), "%H:%M").time()
+                current_time = now.time()
+
+                if start_time <= end_time:
+                    return start_time <= current_time <= end_time
+                else:
+                    return current_time >= start_time or current_time <= end_time
+            except Exception as e:
+                logger.warning(f"[{self.camera_id}] Gagal parse format jadwal: {e}")
+                return True
+        return True
+
     async def _run_recording_loop(self):
-        """Loop recording 24/7 dengan auto-reconnect."""
+        """Loop recording dengan auto-reconnect dan pengecekan jadwal."""
         from backend.services.recorder.manager import RecordingManager
 
         while self.is_running:
             try:
+                # Check recording schedule
+                if not self.is_within_schedule():
+                    manager = RecordingManager.get_instance()
+                    await manager.update_camera_status(self.camera_id, "scheduled-off")
+
+                    if self._record_proc and self._record_proc.returncode is None:
+                        logger.info(f"[{self.camera_id}] Di luar jadwal perekaman, menonaktifkan perekaman.")
+                        self._record_proc.terminate()
+                        await self._record_proc.wait()
+                        if self._record_slot_acquired:
+                            await self._release_ffmpeg_slot()
+                            self._record_slot_acquired = False
+
+                    await asyncio.sleep(30)
+                    continue
+
                 output_dir = self._get_output_dir()
                 output_dir.mkdir(parents=True, exist_ok=True)
                 output_pattern = str(output_dir / "%H-%M-%S.mp4")
 
-                cmd = build_record_command(self.camera["rtsp_main"], output_pattern)
+                rtsp_url = self.camera.get("rtsp_url_main") or self.camera["rtsp_main"]
+                cmd = build_record_command(rtsp_url, output_pattern)
                 logger.info(
                     f"[REC] Camera {self.camera_id} mulai rekam ke {self.camera.get('storage_drive')}",
                     extra={"camera_id": self.camera_id, "action": "start"},
@@ -305,7 +354,12 @@ class CameraRecorder:
         hls_dir = HLS_BASE_DIR / f"{self.camera_id}_sub"
         hls_dir.mkdir(parents=True, exist_ok=True)
 
-        rtsp_url = self.camera.get("rtsp_sub") or self.camera["rtsp_main"]
+        rtsp_url = (
+            self.camera.get("rtsp_url_sub")
+            or self.camera.get("rtsp_sub")
+            or self.camera.get("rtsp_url_main")
+            or self.camera["rtsp_main"]
+        )
 
         # Bersihkan file HLS lama sebelum start
         self._clear_hls_files(hls_dir)

@@ -7,11 +7,18 @@ class CameraBase(BaseModel):
     location: str | None = None
     rtsp_main: str
     rtsp_sub: str | None = None
+    rtsp_url_main: str | None = None
+    rtsp_url_sub: str | None = None
     storage_drive: str
     motion_enabled: bool = False
     retention_days: int = 30
     sort_order: int = 0
     config_json: dict | None = None
+    recording_schedule: str = "24h"
+    schedule_start_time: str | None = None
+    schedule_end_time: str | None = None
+    schedule_days: str | None = None
+    group_id: int | None = None
 
 
 class CameraCreate(CameraBase):
@@ -23,11 +30,18 @@ class CameraUpdate(BaseModel):
     location: str | None = None
     rtsp_main: str | None = None
     rtsp_sub: str | None = None
+    rtsp_url_main: str | None = None
+    rtsp_url_sub: str | None = None
     motion_enabled: bool | None = None
     retention_days: int | None = None
     sort_order: int | None = None
     config_json: dict | None = None
     is_active: bool | None = None
+    recording_schedule: str | None = None
+    schedule_start_time: str | None = None
+    schedule_end_time: str | None = None
+    schedule_days: str | None = None
+    group_id: int | None = None
 
 
 class CameraResponse(CameraBase):
