@@ -3,7 +3,7 @@ Router: /api/v1/recordings
 List, playback, download, protect, delete rekaman.
 POST /sync: scan file di disk dan daftarkan ke DB.
 """
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 import tempfile
 import os
@@ -446,4 +446,121 @@ async def delete_recording(
         target_id=str(recording_id),
         detail={"camera_id": rec.camera_id, "file_path": rec.file_path},
         ip_address=request.client.host if request.client else None,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Footage Export Endpoints
+# ---------------------------------------------------------------------------
+from pydantic import BaseModel
+import uuid
+
+class ExportRequest(BaseModel):
+    camera_id: str
+    start_time: datetime
+    end_time: datetime
+
+
+# Global in-memory export job tracker
+# key: job_id, value: {"status": str, "file_path": str, "error": str}
+_export_jobs: dict[str, dict] = {}
+
+
+async def _run_export_background(job_id: str, camera_id: str, start_time: datetime, end_time: datetime):
+    from backend.services.recorder.exporter import export_footage
+    from backend.db.base import AsyncSessionLocal
+
+    _export_jobs[job_id]["status"] = "processing"
+    try:
+        async with AsyncSessionLocal() as db:
+            file_path = await export_footage(db, camera_id, start_time, end_time)
+            _export_jobs[job_id]["status"] = "done"
+            _export_jobs[job_id]["file_path"] = file_path
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).error(f"[EXPORT] Job {job_id} failed: {e}")
+        _export_jobs[job_id]["status"] = "failed"
+        _export_jobs[job_id]["error"] = str(e)
+
+
+@router.post("/export")
+async def trigger_footage_export(
+    body: ExportRequest,
+    background_tasks: BackgroundTasks,
+    _: User = Depends(get_current_user),
+):
+    """
+    Queue a background task to merge and export footage from a custom time range.
+    """
+    if body.end_time <= body.start_time:
+        raise HTTPException(status_code=400, detail="Waktu selesai harus setelah waktu mulai")
+
+    duration = body.end_time - body.start_time
+    if duration > timedelta(hours=24):
+        raise HTTPException(status_code=400, detail="Rentang waktu export maksimal 24 jam")
+
+    job_id = str(uuid.uuid4())
+    _export_jobs[job_id] = {
+        "status": "queued",
+        "file_path": None,
+        "error": None
+    }
+
+    background_tasks.add_task(
+        _run_export_background,
+        job_id,
+        body.camera_id,
+        body.start_time,
+        body.end_time
+    )
+
+    return {
+        "job_id": job_id,
+        "status": "queued"
+    }
+
+
+@router.get("/export/{job_id}")
+async def get_export_status(
+    job_id: str,
+    _: User = Depends(get_current_user),
+):
+    """
+    Get the status of an export job.
+    """
+    job = _export_jobs.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Pekerjaan export tidak ditemukan")
+
+    response = {
+        "status": job["status"],
+        "download_url": f"/api/v1/recordings/export/{job_id}/download" if job["status"] == "done" else None
+    }
+    if job["error"]:
+        response["error"] = job["error"]
+    return response
+
+
+@router.get("/export/{job_id}/download")
+async def download_exported_file(
+    job_id: str,
+    _: User = Depends(get_current_user),
+):
+    """
+    Stream/download the exported video file.
+    """
+    job = _export_jobs.get(job_id)
+    if not job or job["status"] != "done" or not job["file_path"]:
+        raise HTTPException(status_code=404, detail="File hasil export tidak ditemukan atau belum selesai")
+
+    file_path = Path(job["file_path"])
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="File hasil export sudah dibersihkan atau tidak ada")
+
+    filename = file_path.name
+    return FileResponse(
+        path=file_path,
+        media_type="video/mp4",
+        filename=filename,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'}
     )
