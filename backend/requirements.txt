@@ -23,6 +23,10 @@ pyyaml==6.0.2
 opencv-python-headless==4.10.0.84
 numpy==1.26.4
 
+# ONVIF camera control
+onvif-zeep==0.2.12
+zeep==4.2.1
+
 # Notifications
 aiohttp==3.10.0
 

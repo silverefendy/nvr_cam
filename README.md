@@ -46,7 +46,7 @@ nvr_cam/
 │       └── services/ ← API service layer
 ├── config/           ← cameras.yaml, system.yaml, storage.yaml
 ├── scripts/          ← install.sh, update.sh, nginx, systemd
-└── docs/             ← NVR_CAM_Blueprint.md + audit engineering
+└── docs/             ← semua dokumentasi proyek
 ```
 
 ## Tech Stack
@@ -106,8 +106,14 @@ cd frontend && npm install && npm run dev
 # Buka http://localhost:5173
 ```
 
-## Progress, Handoff, and Audit
+## Dokumentasi
 
-- **[HANDOFF.md](HANDOFF.md)** - status implementasi terkini dan panduan melanjutkan development.
-- **[ISSUES.md](ISSUES.md)** - bug, backlog, dan verifikasi yang masih terbuka.
-- **[docs/AUDIT_REPORT.md](docs/AUDIT_REPORT.md)** - audit engineering terbaru dan rekomendasi prioritas.
+Semua dokumentasi ada di folder `docs/` — maksimal 5 file:
+
+| File | Isi |
+|------|-----|
+| **[docs/HANDOFF.md](docs/HANDOFF.md)** | Status proyek terkini, panduan Claude baru, issue tracker, backlog |
+| **[docs/FEATURES.md](docs/FEATURES.md)** | Daftar lengkap 136 fitur + status masing-masing |
+| **[docs/TECH_DEBT.md](docs/TECH_DEBT.md)** | Audit engineering, technical debt, improvement roadmap |
+| **[docs/INSTALL_OPS.md](docs/INSTALL_OPS.md)** | Panduan install (Windows/Ubuntu), runbook operasional, arsitektur, security, performance |
+| **[docs/NVR_CAM_Blueprint.md](docs/NVR_CAM_Blueprint.md)** | Blueprint teknis lengkap sistem NVR |

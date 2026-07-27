@@ -15,11 +15,19 @@ export const CameraGrid: React.FC = () => {
   const dragIndexRef = useRef<number | null>(null)
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null)
 
-  const handleDragStart = (index: number) => { dragIndexRef.current = index }
+  // Track drag state untuk bedakan drag vs dblclick
+  const isDraggingRef = useRef(false)
+
+  const handleDragStart = (index: number) => {
+    isDraggingRef.current = true
+    dragIndexRef.current = index
+  }
+
   const handleDragOver = (e: React.DragEvent, index: number) => {
     e.preventDefault()
     setDragOverIndex(index)
   }
+
   const handleDrop = (e: React.DragEvent, toIndex: number) => {
     e.preventDefault()
     const fromIndex = dragIndexRef.current
@@ -27,9 +35,12 @@ export const CameraGrid: React.FC = () => {
     dragIndexRef.current = null
     setDragOverIndex(null)
   }
+
   const handleDragEnd = () => {
     dragIndexRef.current = null
     setDragOverIndex(null)
+    // Reset setelah delay kecil agar dblclick tidak terpicu saat drag selesai
+    setTimeout(() => { isDraggingRef.current = false }, 50)
   }
 
   const totalSlots = gridRows * gridCols
@@ -68,7 +79,8 @@ export const CameraGrid: React.FC = () => {
               position: 'relative',
               outline: dragOverIndex === index ? '2px solid #38bdf8' : 'none',
               outlineOffset: '-2px',
-              cursor: 'grab',
+              // Gunakan 'default' bukan 'grab' agar dblclick lebih mudah
+              cursor: 'default',
               overflow: 'hidden',
               minHeight: 0,
               minWidth: 0,
@@ -84,9 +96,10 @@ export const CameraGrid: React.FC = () => {
               className="drag-handle"
               style={{
                 position: 'absolute', top: 4, left: 4,
-                opacity: 0, transition: 'opacity 0.15s', pointerEvents: 'none',
+                opacity: 0, transition: 'opacity 0.15s',
                 background: 'rgba(0,0,0,0.6)', borderRadius: 3,
                 padding: '1px 5px', color: '#fff', fontSize: 9, userSelect: 'none',
+                cursor: 'grab', pointerEvents: 'auto',
               }}
             >
               ⠿
