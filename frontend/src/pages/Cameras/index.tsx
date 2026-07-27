@@ -2,6 +2,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { apiClient } from '@/api/client'
 import { CameraForm } from "@/components/camera/CameraForm"
+import { DiscoveryModal } from "@/components/camera/DiscoveryModal"
 
 type SortKey = 'id' | 'name' | 'location' | 'is_online' | 'storage_drive' | 'motion_enabled' | 'retention_days'
 type SortDir = 'asc' | 'desc'
@@ -9,6 +10,7 @@ type StatusFilter = 'all' | 'online' | 'offline'
 
 export default function CamerasPage() {
   const [showForm, setShowForm] = useState(false)
+  const [showDiscovery, setShowDiscovery] = useState(false)
   const [editingCamera, setEditingCamera] = useState<any | null>(null)
   const [sortKey, setSortKey] = useState<SortKey>('id')
   const [sortDir, setSortDir] = useState<SortDir>('asc')
@@ -170,6 +172,10 @@ export default function CamerasPage() {
             >✕</button>
           )}
           <button
+            onClick={() => setShowDiscovery(true)}
+            className="px-3 py-1 bg-emerald-700 hover:bg-emerald-600 rounded text-xs text-white"
+          >🔍 Cari Kamera</button>
+          <button
             onClick={handleAdd}
             className="px-3 py-1 bg-blue-600 hover:bg-blue-700 rounded text-xs text-white"
           >+ Add Camera</button>
@@ -241,5 +247,13 @@ export default function CamerasPage() {
         )}
       </div>
     </div>
+
+      {showDiscovery && (
+        <DiscoveryModal
+          storageDrives={storageDrives || []}
+          onClose={() => setShowDiscovery(false)}
+        />
+      )}
   )
 }
+
