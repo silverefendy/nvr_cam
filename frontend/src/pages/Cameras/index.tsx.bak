@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+﻿import { useState, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { apiClient } from '@/api/client'
 import { CameraForm } from "@/components/camera/CameraForm"
@@ -247,13 +247,14 @@ export default function CamerasPage() {
           </table>
         )}
       </div>
+    </div>
+
       {showDiscovery && (
         <DiscoveryModal
           storageDrives={storageDrives || []}
           onClose={() => setShowDiscovery(false)}
         />
       )}
-    </div>
   )
 }
 

@@ -18,7 +18,7 @@ from backend.api.dependencies import get_current_admin_user
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/discovery", tags=["discovery"])
+router = APIRouter(tags=["discovery"])
 
 
 # ---------------------------------------------------------------------------

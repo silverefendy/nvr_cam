@@ -1,5 +1,5 @@
-﻿import { useState, useRef } from 'react'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useState, useRef } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { discoveryApi, type DiscoveredCamera } from '@/api/discovery'
 import { apiClient } from '@/api/client'
 
@@ -8,11 +8,6 @@ interface Props {
   onClose: () => void
 }
 
-/** Format RTSP url dari hasil discovery agar bisa langsung dipakai CameraForm */
-function buildRtspMain(cam: DiscoveredCamera): string {
-  if (cam.rtsp_url) return cam.rtsp_url
-  return `rtsp://${cam.ip}:${cam.port}/`
-}
 
 export function DiscoveryModal({ storageDrives, onClose }: Props) {
   const queryClient = useQueryClient()
