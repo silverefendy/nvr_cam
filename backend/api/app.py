@@ -20,6 +20,7 @@ from backend.api.routers import (
     settings as settings_router, system,
     config as config_router, discovery as discovery_router,
     audit_logs as audit_logs_router,
+    camera_groups as camera_groups_router,
 )
 from backend.db.base import AsyncSessionLocal
 from backend.db.repositories.camera_repo import CameraRepository
@@ -82,6 +83,8 @@ async def lifespan(app: FastAPI):
                 "location": cam.location,
                 "rtsp_main": cam.rtsp_main,
                 "rtsp_sub": cam.rtsp_sub,
+                "rtsp_url_main": cam.rtsp_url_main,
+                "rtsp_url_sub": cam.rtsp_url_sub,
                 "storage_drive": cam.storage_drive,
                 "motion_enabled": cam.motion_enabled,
                 "retention_days": cam.retention_days,
@@ -89,6 +92,10 @@ async def lifespan(app: FastAPI):
                 "status": getattr(cam, "status", "offline"),
                 "is_active": cam.is_active,
                 "config_json": cam.config_json,
+                "recording_schedule": cam.recording_schedule,
+                "schedule_start_time": cam.schedule_start_time,
+                "schedule_end_time": cam.schedule_end_time,
+                "schedule_days": cam.schedule_days,
             })
 
         logger.info(f"Starting recording for {len(camera_dicts)} cameras")
@@ -197,6 +204,7 @@ def create_app() -> FastAPI:
     app.include_router(config_router.router,     prefix="/api/v1/config")
     app.include_router(discovery_router.router,  prefix="/api/v1/discovery")
     app.include_router(audit_logs_router.router, prefix="/api/v1/audit-logs")
+    app.include_router(camera_groups_router.router, prefix="/api/v1/camera-groups")
 
     return app
 

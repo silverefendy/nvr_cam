@@ -34,6 +34,8 @@ def _camera_to_dict(cam, recording_manager=None, camera_id: str = None) -> dict:
         "location": cam.location,
         "rtsp_main": cam.rtsp_main,
         "rtsp_sub": cam.rtsp_sub,
+        "rtsp_url_main": cam.rtsp_url_main,
+        "rtsp_url_sub": cam.rtsp_url_sub,
         "storage_drive": cam.storage_drive,
         "motion_enabled": cam.motion_enabled,
         "retention_days": cam.retention_days,
@@ -42,6 +44,11 @@ def _camera_to_dict(cam, recording_manager=None, camera_id: str = None) -> dict:
         "is_active": cam.is_active,
         "sort_order": cam.sort_order,
         "config_json": cam.config_json,
+        "recording_schedule": cam.recording_schedule,
+        "schedule_start_time": cam.schedule_start_time,
+        "schedule_end_time": cam.schedule_end_time,
+        "schedule_days": cam.schedule_days,
+        "group_id": cam.group_id,
         "last_seen": getattr(cam, "last_seen", None),
     }
 
@@ -321,3 +328,120 @@ async def test_connection(
             "status": "failed",
             "message": "Tidak dapat terhubung ke kamera. Periksa URL RTSP, IP, username, dan password.",
         }
+
+
+import time
+from pathlib import Path
+import subprocess
+from datetime import datetime, timezone
+from fastapi.responses import FileResponse
+
+
+@router.post("/{camera_id}/snapshot")
+async def take_manual_snapshot(
+    camera_id: str,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    repo = CameraRepository(db)
+    camera = await repo.get_by_id(camera_id)
+    if not camera:
+        raise HTTPException(status_code=404, detail="Kamera tidak ditemukan")
+
+    # Use dual-stream fallback
+    rtsp_url = camera.rtsp_url_sub or camera.rtsp_sub or camera.rtsp_url_main or camera.rtsp_main
+    if not rtsp_url:
+        raise HTTPException(status_code=400, detail="URL RTSP kamera tidak tersedia")
+
+    snapshot_dir = Path("/var/lib/nvr_cam/snapshots")
+    snapshot_dir.mkdir(parents=True, exist_ok=True)
+
+    timestamp = int(time.time())
+    filename = f"{camera_id}_{timestamp}.jpg"
+    output_path = snapshot_dir / filename
+
+    cmd = [
+        "ffmpeg", "-y", "-rtsp_transport", "tcp",
+        "-i", rtsp_url,
+        "-vframes", "1",
+        "-q:v", "2",
+        str(output_path)
+    ]
+    try:
+        subprocess.run(cmd, timeout=15, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except subprocess.TimeoutExpired:
+        raise HTTPException(status_code=504, detail="Gagal mengambil snapshot: FFmpeg timeout")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Gagal mengambil snapshot: {e}")
+
+    if not output_path.exists():
+        raise HTTPException(status_code=500, detail="Gagal menyimpan snapshot")
+
+    url = f"/api/v1/cameras/{camera_id}/snapshots/{filename}"
+    return {
+        "url": url,
+        "filename": filename,
+        "timestamp": datetime.fromtimestamp(timestamp, timezone.utc).isoformat()
+    }
+
+
+@router.get("/{camera_id}/snapshots")
+async def list_manual_snapshots(
+    camera_id: str,
+    _user: User = Depends(get_current_user),
+):
+    snapshot_dir = Path("/var/lib/nvr_cam/snapshots")
+    if not snapshot_dir.exists():
+        return []
+
+    snapshots = []
+    for f in sorted(snapshot_dir.glob(f"{camera_id}_*.jpg"), key=lambda p: p.stat().st_mtime, reverse=True):
+        filename = f.name
+        try:
+            parts = f.stem.split("_")
+            ts = int(parts[-1])
+            dt = datetime.fromtimestamp(ts, timezone.utc).isoformat()
+        except Exception:
+            dt = datetime.fromtimestamp(f.stat().st_mtime, timezone.utc).isoformat()
+
+        snapshots.append({
+            "filename": filename,
+            "url": f"/api/v1/cameras/{camera_id}/snapshots/{filename}",
+            "timestamp": dt,
+            "size_bytes": f.stat().st_size,
+        })
+    return snapshots
+
+
+@router.get("/{camera_id}/snapshots/{filename}")
+async def serve_manual_snapshot_file(
+    camera_id: str,
+    filename: str,
+    _user: User = Depends(get_current_user),
+):
+    snapshot_dir = Path("/var/lib/nvr_cam/snapshots")
+    file_path = snapshot_dir / filename
+
+    if not file_path.resolve().is_relative_to(snapshot_dir.resolve()):
+        raise HTTPException(status_code=400, detail="Path tidak valid")
+    if not file_path.exists() or not filename.startswith(f"{camera_id}_"):
+        raise HTTPException(status_code=404, detail="File snapshot tidak ditemukan")
+
+    return FileResponse(file_path, media_type="image/jpeg")
+
+
+@router.delete("/{camera_id}/snapshots/{filename}", status_code=204)
+async def delete_manual_snapshot(
+    camera_id: str,
+    filename: str,
+    _user: User = Depends(get_current_user),
+):
+    snapshot_dir = Path("/var/lib/nvr_cam/snapshots")
+    file_path = snapshot_dir / filename
+
+    if not file_path.resolve().is_relative_to(snapshot_dir.resolve()):
+        raise HTTPException(status_code=400, detail="Path tidak valid")
+    if not file_path.exists() or not filename.startswith(f"{camera_id}_"):
+        raise HTTPException(status_code=404, detail="File snapshot tidak ditemukan")
+
+    file_path.unlink()

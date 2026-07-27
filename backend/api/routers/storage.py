@@ -3,14 +3,27 @@ import shutil
 import yaml
 from pathlib import Path
 from fastapi import APIRouter, Depends, Request, HTTPException
-from backend.api.middleware.auth import get_current_user, require_role
+from pydantic import BaseModel
+import urllib.parse
+from backend.api.middleware.auth import get_current_user, require_role, get_current_super_admin
 from backend.api.schemas.storage import DriveStatus
-from backend.db.base import AsyncSessionLocal
+from backend.db.base import AsyncSessionLocal, get_db
+from sqlalchemy.ext.asyncio import AsyncSession
 from backend.db.repositories.camera_repo import CameraRepository
 from backend.db.models.user import User
 from backend.services.transcode_queue import TranscodeQueue
+from backend.utils.config_manager import config_manager
 
 router = APIRouter(tags=["storage"])
+
+
+class DriveCreate(BaseModel):
+    path: str
+    name: str | None = None
+
+
+class CameraAssign(BaseModel):
+    camera_ids: list[str]
 
 
 async def _get_effective_drives(request: Request) -> list[str]:
@@ -283,3 +296,96 @@ async def manual_cleanup(request: Request, _: User = Depends(require_role("admin
             storage_manager.check_and_clean(drive, cam_id)
 
     return {"status": "cleanup triggered"}
+
+
+@router.get("/drives")
+async def list_drives(_user: User = Depends(get_current_super_admin)):
+    """List semua drive dari storage.yaml."""
+    config = await config_manager.get_storage_config()
+    return config.get("drives", [])
+
+
+@router.post("/drives")
+async def add_drive(body: DriveCreate, _user: User = Depends(get_current_super_admin)):
+    """Tambah drive baru ke storage.yaml."""
+    config = await config_manager.get_storage_config()
+    drives = config.get("drives", [])
+
+    if any(d.get("path") == body.path for d in drives):
+        raise HTTPException(status_code=400, detail=f"Drive dengan path {body.path} sudah terdaftar")
+
+    new_drive = {
+        "path": body.path,
+        "name": body.name,
+        "cameras": []
+    }
+    drives.append(new_drive)
+    config["drives"] = drives
+    await config_manager.update_storage_config(config)
+    return {"message": "Drive berhasil ditambahkan", "drives": drives}
+
+
+@router.delete("/drives/{path_encoded}")
+async def delete_drive(path_encoded: str, _user: User = Depends(get_current_super_admin)):
+    """Hapus drive dari storage.yaml."""
+    path = urllib.parse.unquote(path_encoded)
+    config = await config_manager.get_storage_config()
+    drives = config.get("drives", [])
+
+    new_drives = [d for d in drives if d.get("path") != path]
+    if len(new_drives) == len(drives):
+        raise HTTPException(status_code=404, detail=f"Drive dengan path {path} tidak ditemukan")
+
+    config["drives"] = new_drives
+    await config_manager.update_storage_config(config)
+    return {"message": f"Drive {path} berhasil dihapus"}
+
+
+@router.put("/drives/{path_encoded}/assign")
+async def assign_cameras(
+    path_encoded: str,
+    body: CameraAssign,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_super_admin),
+):
+    """Assign kamera ke drive."""
+    path = urllib.parse.unquote(path_encoded)
+    config = await config_manager.get_storage_config()
+    drives = config.get("drives", [])
+
+    drive_found = None
+    for d in drives:
+        if d.get("path") == path:
+            drive_found = d
+            break
+
+    if not drive_found:
+        raise HTTPException(status_code=404, detail=f"Drive dengan path {path} tidak ditemukan")
+
+    # Update cameras in drives list
+    for d in drives:
+        if d.get("path") == path:
+            d["cameras"] = body.camera_ids
+        else:
+            d["cameras"] = [cid for cid in d.get("cameras", []) if cid not in body.camera_ids]
+
+    config["drives"] = drives
+    await config_manager.update_storage_config(config)
+
+    # Sync and update storage_drive for each camera in database
+    repo = CameraRepository(db)
+    recording_manager = request.app.state.recording_manager
+    storage_manager = request.app.state.storage_manager
+
+    for camera_id in body.camera_ids:
+        camera = await repo.get_by_id(camera_id)
+        if camera:
+            camera.storage_drive = path
+            if storage_manager:
+                storage_manager.update_camera_drive(camera_id, path)
+            if recording_manager:
+                await recording_manager.restart_camera(camera_id)
+
+    await db.commit()
+    return {"message": f"Kamera berhasil dipetakan ke drive {path}"}
