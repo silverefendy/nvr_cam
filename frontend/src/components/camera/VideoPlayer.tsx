@@ -71,6 +71,17 @@ export const VideoPlayer: React.FC<Props> = ({
     setStreamType(cameraId, streamType === 'main' ? 'sub' : 'main')
   }
 
+  // ─── Double-click fullscreen ──────────────────────────────────────────────
+  // Pisah dari drag handler di CameraGrid agar tidak ter-intercept.
+  // Gunakan useRef untuk track click timing supaya tidak konflik dengan
+  // single-click (onClick prop). dblclick event native lebih reliable
+  // daripada track manual dengan setTimeout di sini.
+  const handleDoubleClick = useCallback((e: React.MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setFullscreen(cameraId)
+  }, [cameraId, setFullscreen])
+
   const containerStyle: React.CSSProperties = {
     position: 'relative',
     width: '100%',
@@ -108,6 +119,7 @@ export const VideoPlayer: React.FC<Props> = ({
       className={`group ${className ?? ''}`}
       style={containerStyle}
       onClick={onClick}
+      onDoubleClick={handleDoubleClick}
     >
       {showSnapshotView && snapshotUrl ? (
         <div style={{ position: 'absolute', inset: 0 }}>
@@ -121,18 +133,12 @@ export const VideoPlayer: React.FC<Props> = ({
         </div>
       ) : (
         <>
-          {/*
-            objectFit: 'cover' — video mengisi penuh kotak tanpa letterbox hitam.
-            Sisi yang lebih panjang akan terpotong sedikit, tapi seluruh kotak terisi video.
-            Ganti ke 'contain' kalau mau melihat full frame tanpa crop.
-          */}
           <video
             ref={videoRef}
             style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
             muted
             autoPlay
             playsInline
-            onDoubleClick={handleFullscreen}
           />
 
           {/* Bottom bar */}
@@ -172,7 +178,7 @@ export const VideoPlayer: React.FC<Props> = ({
               <div style={{ display: 'flex', gap: 4 }}>
                 <button onClick={handleSnapshot} title="Snapshot" style={btnStyle}>📷</button>
                 {pipSupported && <button onClick={handlePiP} title="Picture in Picture" style={btnStyle}>⧉</button>}
-                <button onClick={handleFullscreen} title="Fullscreen" style={btnStyle}>⛶</button>
+                <button onClick={handleFullscreen} title="Fullscreen (juga bisa double-click)" style={btnStyle}>⛶</button>
               </div>
             </div>
           )}
