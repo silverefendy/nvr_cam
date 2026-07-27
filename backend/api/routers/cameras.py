@@ -706,3 +706,106 @@ async def delete_manual_snapshot(
     if not file_path.exists() or not filename.startswith(f"{camera_id}_"):
         raise HTTPException(status_code=404, detail="File snapshot tidak ditemukan")
     file_path.unlink()
+
+
+# ---------------------------------------------------------------------------
+# ONVIF PTZ Controls Endpoints
+# ---------------------------------------------------------------------------
+
+class PTZMoveRequest(BaseModel):
+    direction: str
+    speed: float = 0.5
+
+
+class PTZPresetCreateRequest(BaseModel):
+    name: str
+
+
+async def _check_ptz_enabled(camera_id: str, db: AsyncSession) -> Camera:
+    repo = CameraRepository(db)
+    camera = await repo.get_by_id(camera_id)
+    if not camera:
+        raise HTTPException(status_code=404, detail="Kamera tidak ditemukan")
+
+    config_extra = camera.config_json or {}
+    if not config_extra.get("ptz_enabled", False):
+        raise HTTPException(status_code=400, detail="PTZ controls are not supported or enabled for this camera")
+    return camera
+
+
+@router.post("/{camera_id}/ptz/move")
+async def ptz_move(
+    camera_id: str,
+    body: PTZMoveRequest,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    await _check_ptz_enabled(camera_id, db)
+    try:
+        from backend.services.camera.ptz import PTZController
+        await PTZController.move(camera_id, body.direction, body.speed)
+        return {"status": "ok", "message": f"Moving camera {body.direction}"}
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"PTZ Move Error: {e}")
+
+
+@router.post("/{camera_id}/ptz/stop")
+async def ptz_stop(
+    camera_id: str,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    await _check_ptz_enabled(camera_id, db)
+    try:
+        from backend.services.camera.ptz import PTZController
+        await PTZController.stop(camera_id)
+        return {"status": "ok", "message": "Stopped camera movement"}
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"PTZ Stop Error: {e}")
+
+
+@router.get("/{camera_id}/ptz/presets")
+async def ptz_get_presets(
+    camera_id: str,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    await _check_ptz_enabled(camera_id, db)
+    try:
+        from backend.services.camera.ptz import PTZController
+        presets = await PTZController.get_presets(camera_id)
+        return presets
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"PTZ Get Presets Error: {e}")
+
+
+@router.post("/{camera_id}/ptz/presets")
+async def ptz_create_preset(
+    camera_id: str,
+    body: PTZPresetCreateRequest,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    await _check_ptz_enabled(camera_id, db)
+    try:
+        from backend.services.camera.ptz import PTZController
+        token = await PTZController.set_preset(camera_id, body.name)
+        return {"status": "ok", "preset_token": token, "message": f"Preset '{body.name}' created with token '{token}'"}
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"PTZ Create Preset Error: {e}")
+
+
+@router.post("/{camera_id}/ptz/presets/{token}/goto")
+async def ptz_goto_preset(
+    camera_id: str,
+    token: str,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    await _check_ptz_enabled(camera_id, db)
+    try:
+        from backend.services.camera.ptz import PTZController
+        await PTZController.goto_preset(camera_id, token)
+        return {"status": "ok", "message": f"Moved to preset {token}"}
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"PTZ Goto Preset Error: {e}")

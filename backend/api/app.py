@@ -5,6 +5,7 @@ Semua router didaftarkan di sini.
 import asyncio
 import uuid
 import yaml
+import json
 from contextlib import asynccontextmanager
 from pathlib import Path
 from fastapi import FastAPI, Request
@@ -25,11 +26,13 @@ from backend.api.routers import (
 from backend.db.base import AsyncSessionLocal
 from backend.db.repositories.camera_repo import CameraRepository
 from backend.db.models.camera import Camera
+from backend.db.models.app_setting import AppSetting
 from backend.services.recorder.manager import RecordingManager
 from backend.services.storage.manager import StorageManager
 from backend.services.motion.manager import MotionManager
 from backend.services.transcode_queue import TranscodeQueue
 from backend.api.websocket import ConnectionManager
+from sqlalchemy import select
 
 logger = get_logger(__name__, service="api")
 
@@ -44,7 +47,41 @@ async def lifespan(app: FastAPI):
     motion_manager = None
 
     try:
+        # 1. Seed any missing app settings or cameras from YAML files
         async with AsyncSessionLocal() as db:
+            # Seed app settings
+            res = await db.execute(select(AppSetting).where(AppSetting.key == "system"))
+            if not res.scalar_one_or_none():
+                system_yaml_path = Path(__file__).parent.parent.parent / "config" / "system.yaml"
+                if system_yaml_path.exists():
+                    with open(system_yaml_path) as f:
+                        sys_data = yaml.safe_load(f) or {}
+                    db.add(AppSetting(key="system", value=json.dumps(sys_data)))
+                    logger.info("Seeded system settings from YAML")
+
+            res = await db.execute(select(AppSetting).where(AppSetting.key == "storage"))
+            if not res.scalar_one_or_none():
+                storage_yaml_path = Path(__file__).parent.parent.parent / "config" / "storage.yaml"
+                if storage_yaml_path.exists():
+                    with open(storage_yaml_path) as f:
+                        stor_data = yaml.safe_load(f) or {}
+                    db.add(AppSetting(key="storage", value=json.dumps(stor_data)))
+                    logger.info("Seeded storage settings from YAML")
+
+            res = await db.execute(select(AppSetting).where(AppSetting.key == "notification"))
+            if not res.scalar_one_or_none():
+                notif_data = {
+                    "telegram_bot_token": app_settings.telegram_bot_token,
+                    "telegram_chat_id": app_settings.telegram_chat_id,
+                    "smtp_host": app_settings.smtp_host,
+                    "smtp_port": app_settings.smtp_port,
+                    "smtp_user": app_settings.smtp_user,
+                    "smtp_password": app_settings.smtp_password,
+                }
+                db.add(AppSetting(key="notification", value=json.dumps(notif_data)))
+                logger.info("Seeded notification settings from .env")
+
+            # Seed cameras
             camera_repo = CameraRepository(db)
             cameras = await camera_repo.get_active_cameras()
 
@@ -68,13 +105,16 @@ async def lifespan(app: FastAPI):
                             config_json=cam_config.get("config_json"),
                         )
                         await camera_repo.create(camera)
-                    await db.commit()
                     cameras = await camera_repo.get_active_cameras()
                     logger.info(f"Seeded {len(cameras)} cameras from config")
 
+            await db.commit()
+
+        # 2. Load database settings into backend/core/config.py settings in-memory cache
+        from backend.utils.config_manager import load_db_settings_into_config
+        await load_db_settings_into_config()
+
         # Convert cameras to dict for RecordingManager
-        # segment_duration and status are optional fields not in the Camera model;
-        # use safe getattr with defaults.
         camera_dicts = []
         for cam in cameras:
             camera_dicts.append({
@@ -120,6 +160,30 @@ async def lifespan(app: FastAPI):
         transcode_queue.start()
         app.state.transcode_queue = transcode_queue
         app.state.websocket_manager = ConnectionManager()
+
+        # Startup a background cleanup routine
+        try:
+            from backend.services.storage.cleanup import start_cleanup_worker
+            start_cleanup_worker()
+            logger.info("Orphan metadata cleanup worker started")
+        except Exception as e:
+            logger.error(f"Failed to start cleanup worker: {e}")
+
+        # Startup a background health checker routine
+        try:
+            from backend.services.health.checker import start_health_checker
+            start_health_checker()
+            logger.info("Camera health checker started")
+        except Exception as e:
+            logger.error(f"Failed to start health checker: {e}")
+
+        # Startup a background export cleanup routine
+        try:
+            from backend.services.recorder.exporter import start_export_cleanup_worker
+            start_export_cleanup_worker()
+            logger.info("Export cleanup worker started")
+        except Exception as e:
+            logger.error(f"Failed to start export cleanup worker: {e}")
 
         logger.info("NVR API service started successfully")
 

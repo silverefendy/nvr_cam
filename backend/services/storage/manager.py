@@ -4,15 +4,19 @@ scheduled cleanup, dan alert Telegram saat disk kritis.
 """
 import asyncio
 import shutil
+import os
 from pathlib import Path
 from datetime import datetime, timezone
+from sqlalchemy import select
 from backend.core.logging import get_logger
 from backend.core.config import settings
+from backend.db.base import AsyncSessionLocal
+from backend.db.models.recording import Recording
+from backend.utils.config_manager import config_manager
+from backend.services.storage.cleanup import cleanup_orphan_metadata
 
 logger = get_logger(__name__, service="storage")
 
-# Jeda minimum antar alert Telegram per drive (menit)
-# Supaya tidak spam saat disk terus kritis
 _ALERT_COOLDOWN_MINUTES = 60
 
 
@@ -25,9 +29,7 @@ class StorageManager:
         self.camera_drive_map = camera_drive_map
         self.threshold_pct = settings.storage_threshold_pct
         self._running = False
-        # Cooldown tracker: {drive_path: last_alert_datetime}
         self._last_alert: dict[str, datetime] = {}
-        # Dispatcher disuntikkan dari luar setelah app startup
         self.dispatcher = None
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -93,7 +95,7 @@ class StorageManager:
         return result
 
     # ─────────────────────────────────────────────────────────────────────────
-    # Cleanup
+    # Cleanup & Purge
     # ─────────────────────────────────────────────────────────────────────────
 
     def check_and_clean(self, drive: str, camera_id: str):
@@ -123,6 +125,94 @@ class StorageManager:
                 pass
             status = self.get_drive_status(drive)
 
+    async def auto_purge_storage(self, db):
+        """
+        Enforce disk quotas automatically:
+        If disk usage > 90% (or DB-configured threshold), delete oldest unprotected
+        recordings and their files in batches until usage <= 80% (or DB safe threshold).
+        After each batch, trigger cleanup_orphan_metadata.
+        """
+        logger.info("[PURGE] Starting auto purge storage check...")
+
+        # Load DB configs
+        sys_config = await config_manager.get_system_config()
+        storage_section = sys_config.get("storage", {})
+
+        # We calculate limits. default threshold is 90% used (sisa free < 10%)
+        # but threshold_pct is defined as free percentage or used percentage?
+        # In .env: STORAGE_THRESHOLD_PCT=10.0 (free percentage, so <10% sisa disk triggers warning)
+        # Task 2B says: "If usage > 90% (threshold configurable via DB settings table, default 90), delete oldest recordings... until usage <= 80%"
+        # Usage > 90% is equivalent to sisa disk < 10%. Let's use usage percentage (used / total * 100) > threshold.
+        # threshold from DB or default 90%. safe_threshold from DB or default 80%.
+        purge_threshold = float(storage_section.get("threshold_pct", 90.0))
+        safe_threshold = float(storage_section.get("safe_threshold_pct", 80.0))
+
+        # Gather all distinct drive paths from cameras mapped in StorageManager
+        drives = set(self.camera_drive_map.values())
+
+        for drive in drives:
+            p = Path(drive)
+            if not p.exists():
+                continue
+
+            try:
+                usage = shutil.disk_usage(drive)
+                used_pct = (usage.used / usage.total) * 100
+                logger.info(f"[PURGE] Drive {drive} usage: {used_pct:.1f}% (limit: {purge_threshold:.1f}%)")
+
+                if used_pct <= purge_threshold:
+                    continue
+
+                logger.warning(f"[PURGE] Drive {drive} usage ({used_pct:.1f}%) exceeds threshold ({purge_threshold:.1f}%). Purging oldest recordings...")
+
+                # Fetch all unprotected recordings sorted oldest first
+                stmt = select(Recording).where(Recording.is_protected == False).order_by(Recording.started_at.asc())
+                res = await db.execute(stmt)
+                all_unprotected = res.scalars().all()
+
+                # Filter recordings residing on this drive
+                drive_recs = [r for r in all_unprotected if r.file_path and r.file_path.startswith(drive)]
+
+                if not drive_recs:
+                    logger.warning(f"[PURGE] No unprotected recordings found on drive {drive} to purge.")
+                    continue
+
+                # Delete in batches of 10
+                batch_size = 10
+                idx = 0
+                while used_pct > safe_threshold and idx < len(drive_recs):
+                    batch = drive_recs[idx : idx + batch_size]
+                    idx += batch_size
+
+                    for rec in batch:
+                        # 1. Delete physical file
+                        rec_file = Path(rec.file_path)
+                        freed_bytes = 0
+                        if rec_file.exists():
+                            try:
+                                freed_bytes = rec_file.stat().st_size
+                                rec_file.unlink(missing_ok=True)
+                            except Exception as e:
+                                logger.error(f"[PURGE] Failed to delete file {rec.file_path}: {e}")
+
+                        # 2. Delete database row
+                        await db.delete(rec)
+                        logger.info(f"[PURGE] Deleted camera_id={rec.camera_id}, path={rec.file_path}, freed {freed_bytes} bytes")
+
+                    # Commit batch
+                    await db.commit()
+
+                    # 3. Call cleanup orphan metadata
+                    await cleanup_orphan_metadata(db)
+
+                    # Recalculate usage
+                    usage = shutil.disk_usage(drive)
+                    used_pct = (usage.used / usage.total) * 100
+                    logger.info(f"[PURGE] Post-batch drive {drive} usage: {used_pct:.1f}% (safe: {safe_threshold:.1f}%)")
+
+            except Exception as e:
+                logger.error(f"[PURGE] Error purging drive {drive}: {e}")
+
     # ─────────────────────────────────────────────────────────────────────────
     # Alert Telegram (F-10)
     # ─────────────────────────────────────────────────────────────────────────
@@ -141,10 +231,8 @@ class StorageManager:
         if last is not None:
             elapsed_minutes = (now - last).total_seconds() / 60
             if elapsed_minutes < _ALERT_COOLDOWN_MINUTES:
-                # Masih dalam cooldown, jangan kirim lagi
                 return
 
-        # Catat waktu alert dan kirim
         self._last_alert[drive] = now
         try:
             await self.dispatcher.send_disk_alert(drive, free_pct)
@@ -160,13 +248,17 @@ class StorageManager:
         """
         Background loop untuk monitoring dan cleanup otomatis.
         - Cek disk setiap 15 menit
-        - Jika disk kritis: cleanup + kirim alert Telegram (F-10)
+        - Jika disk kritis: auto-purge + cleanup + kirim alert Telegram (F-10)
         """
         self._running = True
         check_interval = 15 * 60  # 15 menit
 
         while self._running:
             try:
+                # Run auto purge first using a DB session
+                async with AsyncSessionLocal() as db:
+                    await self.auto_purge_storage(db)
+
                 drives = set(self.camera_drive_map.values())
                 for drive in drives:
                     if not Path(drive).exists():
@@ -175,10 +267,8 @@ class StorageManager:
                     status = self.get_drive_status(drive)
 
                     if status["free_pct"] < self.threshold_pct:
-                        # Kirim alert Telegram (F-10) — ada cooldown internal
                         await self._maybe_send_disk_alert(drive, status["free_pct"])
 
-                        # Cleanup kamera di drive ini
                         cameras_on_drive = [
                             cam_id for cam_id, cam_drive in self.camera_drive_map.items()
                             if cam_drive == drive

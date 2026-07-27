@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useMutation, useQuery } from '@tanstack/react-query'
+import { useMutation } from '@tanstack/react-query'
 import { buildDahuaRTSP, maskRTSPPassword } from '@/utils/rtsp'
 import { RTSPTestButton } from './RTSPTestButton'
 import { apiClient } from '@/api/client'

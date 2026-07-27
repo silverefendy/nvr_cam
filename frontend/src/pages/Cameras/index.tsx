@@ -123,6 +123,7 @@ export default function CamerasPage() {
             storage_drive: editingCamera.storage_drive,
             motion_enabled: editingCamera.motion_enabled ?? false,
             retention_days: editingCamera.retention_days || 30,
+            segment_duration: editingCamera.segment_duration || cfg.segment_duration || 1800,
           } : undefined}
           storageDrives={storageDrives || []}
           onSave={handleFormSave}
