@@ -23,11 +23,16 @@ def is_partitioned(table_name: str) -> bool:
     insp = inspect(bind)
     if not insp.has_table(table_name):
         return False
-    # Check if table partitioning is enabled for table by querying pg_partitioned_table
     res = bind.execute(sa.text(
         f"SELECT 1 FROM pg_partitioned_table WHERE partrelid = '{table_name}'::regclass"
     )).fetchone()
     return res is not None
+
+
+def table_exists(table_name: str) -> bool:
+    bind = op.get_bind()
+    insp = inspect(bind)
+    return insp.has_table(table_name)
 
 
 def upgrade() -> None:
@@ -38,100 +43,119 @@ def upgrade() -> None:
 
     print("Converting 'recordings' and 'motion_events' to monthly partitioned tables...")
 
-    # 2. Rename existing tables to temp names
-    op.rename_table("motion_events", "motion_events_old")
-    op.rename_table("recordings", "recordings_old")
+    # --- RECOVERY: handle DB left in a half-migrated state ---
+    # If the old container crashed after rename but before DROP, the _old tables
+    # already exist and the new partitioned tables may already be created too.
+    # We detect this and skip the steps that already completed.
 
-    # 3. Re-create sequence defaults if needed, or link to existing sequences
-    # PostgreSql automatically created sequences 'recordings_id_seq' and 'motion_events_id_seq'
-    # in the initial migration.
+    recordings_old_exists = table_exists("recordings_old")
+    motion_events_old_exists = table_exists("motion_events_old")
 
-    # 4. Create partitioned recordings table
-    op.execute("""
-        CREATE TABLE recordings (
-            id BIGINT NOT NULL DEFAULT nextval('recordings_id_seq'),
-            camera_id VARCHAR(20) REFERENCES cameras(id) ON DELETE CASCADE,
-            file_path TEXT NOT NULL,
-            file_size_mb FLOAT,
-            started_at TIMESTAMPTZ NOT NULL,
-            ended_at TIMESTAMPTZ,
-            duration_s INTEGER,
-            codec VARCHAR(10) NOT NULL DEFAULT 'H265',
-            is_protected BOOLEAN NOT NULL DEFAULT false,
-            is_encoded_av1 BOOLEAN NOT NULL DEFAULT false,
-            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-            PRIMARY KEY (id, created_at)
-        ) PARTITION BY RANGE (created_at);
-    """)
+    # 2. Rename existing tables to temp names (skip if already done)
+    if not motion_events_old_exists:
+        op.rename_table("motion_events", "motion_events_old")
+    if not recordings_old_exists:
+        op.rename_table("recordings", "recordings_old")
 
-    # 5. Create monthly partitions for recordings (from 2025 to 2027)
-    for year in [2025, 2026, 2027]:
-        for month in range(1, 13):
-            partition_name = f"recordings_y{year}m{month:02d}"
-            start_date = f"{year}-{month:02d}-01"
-            if month == 12:
-                end_date = f"{year + 1}-01-01"
-            else:
-                end_date = f"{year}-{month + 1:02d}-01"
-            op.execute(f"CREATE TABLE {partition_name} PARTITION OF recordings FOR VALUES FROM ('{start_date}') TO ('{end_date}')")
+    # 4. Create partitioned recordings table (skip if already created)
+    if not table_exists("recordings"):
+        op.execute("""
+            CREATE TABLE recordings (
+                id BIGINT NOT NULL DEFAULT nextval('recordings_id_seq'),
+                camera_id VARCHAR(20) REFERENCES cameras(id) ON DELETE CASCADE,
+                file_path TEXT NOT NULL,
+                file_size_mb FLOAT,
+                started_at TIMESTAMPTZ NOT NULL,
+                ended_at TIMESTAMPTZ,
+                duration_s INTEGER,
+                codec VARCHAR(10) NOT NULL DEFAULT 'H265',
+                is_protected BOOLEAN NOT NULL DEFAULT false,
+                is_encoded_av1 BOOLEAN NOT NULL DEFAULT false,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                PRIMARY KEY (id, created_at)
+            ) PARTITION BY RANGE (created_at);
+        """)
 
-    # Create DEFAULT partition for recordings
-    op.execute("CREATE TABLE recordings_default PARTITION OF recordings DEFAULT;")
+        # 5. Create monthly partitions for recordings (from 2025 to 2027)
+        for year in [2025, 2026, 2027]:
+            for month in range(1, 13):
+                partition_name = f"recordings_y{year}m{month:02d}"
+                start_date = f"{year}-{month:02d}-01"
+                end_date = f"{year + 1}-01-01" if month == 12 else f"{year}-{month + 1:02d}-01"
+                op.execute(f"CREATE TABLE {partition_name} PARTITION OF recordings FOR VALUES FROM ('{start_date}') TO ('{end_date}')")
 
-    # 6. Copy existing recordings data
-    op.execute("""
-        INSERT INTO recordings (id, camera_id, file_path, file_size_mb, started_at, ended_at, duration_s, codec, is_protected, is_encoded_av1, created_at)
-        SELECT id, camera_id, file_path, file_size_mb, started_at, ended_at, duration_s, codec, is_protected, is_encoded_av1, created_at FROM recordings_old;
-    """)
+        op.execute("CREATE TABLE recordings_default PARTITION OF recordings DEFAULT;")
 
-    # 7. Create partitioned motion_events table
-    op.execute("""
-        CREATE TABLE motion_events (
-            id BIGINT NOT NULL DEFAULT nextval('motion_events_id_seq'),
-            camera_id VARCHAR(20) REFERENCES cameras(id) ON DELETE CASCADE,
-            recording_id BIGINT,
-            zone_name VARCHAR(50),
-            started_at TIMESTAMPTZ NOT NULL,
-            ended_at TIMESTAMPTZ,
-            duration_s INTEGER,
-            snapshot_path TEXT,
-            video_offset_s INTEGER,
-            severity SMALLINT NOT NULL DEFAULT 1,
-            notified BOOLEAN NOT NULL DEFAULT false,
-            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-            PRIMARY KEY (id, created_at)
-        ) PARTITION BY RANGE (created_at);
-    """)
+        # 6. Copy existing recordings data
+        op.execute("""
+            INSERT INTO recordings (id, camera_id, file_path, file_size_mb, started_at, ended_at, duration_s, codec, is_protected, is_encoded_av1, created_at)
+            SELECT id, camera_id, file_path, file_size_mb, started_at, ended_at, duration_s, codec, is_protected, is_encoded_av1, created_at FROM recordings_old;
+        """)
 
-    # 8. Create monthly partitions for motion_events (from 2025 to 2027)
-    for year in [2025, 2026, 2027]:
-        for month in range(1, 13):
-            partition_name = f"motion_events_y{year}m{month:02d}"
-            start_date = f"{year}-{month:02d}-01"
-            if month == 12:
-                end_date = f"{year + 1}-01-01"
-            else:
-                end_date = f"{year}-{month + 1:02d}-01"
-            op.execute(f"CREATE TABLE {partition_name} PARTITION OF motion_events FOR VALUES FROM ('{start_date}') TO ('{end_date}')")
+    # 7. Create partitioned motion_events table (skip if already created)
+    if not table_exists("motion_events"):
+        op.execute("""
+            CREATE TABLE motion_events (
+                id BIGINT NOT NULL DEFAULT nextval('motion_events_id_seq'),
+                camera_id VARCHAR(20) REFERENCES cameras(id) ON DELETE CASCADE,
+                recording_id BIGINT,
+                zone_name VARCHAR(50),
+                started_at TIMESTAMPTZ NOT NULL,
+                ended_at TIMESTAMPTZ,
+                duration_s INTEGER,
+                snapshot_path TEXT,
+                video_offset_s INTEGER,
+                severity SMALLINT NOT NULL DEFAULT 1,
+                notified BOOLEAN NOT NULL DEFAULT false,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                PRIMARY KEY (id, created_at)
+            ) PARTITION BY RANGE (created_at);
+        """)
 
-    # Create DEFAULT partition for motion_events
-    op.execute("CREATE TABLE motion_events_default PARTITION OF motion_events DEFAULT;")
+        # 8. Create monthly partitions for motion_events (from 2025 to 2027)
+        for year in [2025, 2026, 2027]:
+            for month in range(1, 13):
+                partition_name = f"motion_events_y{year}m{month:02d}"
+                start_date = f"{year}-{month:02d}-01"
+                end_date = f"{year + 1}-01-01" if month == 12 else f"{year}-{month + 1:02d}-01"
+                op.execute(f"CREATE TABLE {partition_name} PARTITION OF motion_events FOR VALUES FROM ('{start_date}') TO ('{end_date}')")
 
-    # 9. Copy existing motion_events data
-    op.execute("""
-        INSERT INTO motion_events (id, camera_id, recording_id, zone_name, started_at, ended_at, duration_s, snapshot_path, video_offset_s, severity, notified, created_at)
-        SELECT id, camera_id, recording_id, zone_name, started_at, ended_at, duration_s, snapshot_path, video_offset_s, severity, notified, created_at FROM motion_events_old;
-    """)
+        op.execute("CREATE TABLE motion_events_default PARTITION OF motion_events DEFAULT;")
 
-    # 10. Clean up old tables
-    op.execute("DROP TABLE motion_events_old;")
-    op.execute("DROP TABLE recordings_old;")
+        # 9. Copy existing motion_events data
+        op.execute("""
+            INSERT INTO motion_events (id, camera_id, recording_id, zone_name, started_at, ended_at, duration_s, snapshot_path, video_offset_s, severity, notified, created_at)
+            SELECT id, camera_id, recording_id, zone_name, started_at, ended_at, duration_s, snapshot_path, video_offset_s, severity, notified, created_at FROM motion_events_old;
+        """)
 
-    # 11. Create indexes on the new partitioned tables
-    op.create_index("ix_recordings_camera_id", "recordings", ["camera_id"])
-    op.create_index("ix_recordings_started_at", "recordings", ["started_at"])
-    op.create_index("ix_motion_events_camera_id", "motion_events", ["camera_id"])
-    op.create_index("ix_motion_events_started_at", "motion_events", ["started_at"])
+    # 10. Transfer sequence ownership away from _old tables so DROP succeeds,
+    #     then drop the old tables.
+    #     OWNED BY NONE detaches the sequence from any table; the new partitioned
+    #     tables reference the sequence via DEFAULT nextval(...) which is enough.
+    if table_exists("motion_events_old"):
+        op.execute("ALTER SEQUENCE motion_events_id_seq OWNED BY NONE;")
+        op.execute("DROP TABLE motion_events_old;")
+
+    if table_exists("recordings_old"):
+        op.execute("ALTER SEQUENCE recordings_id_seq OWNED BY NONE;")
+        op.execute("DROP TABLE recordings_old;")
+
+    # 11. Create indexes on the new partitioned tables (skip if already exist)
+    bind = op.get_bind()
+    insp = inspect(bind)
+    existing_indexes = {idx['name'] for idx in insp.get_indexes('recordings')}
+    if "ix_recordings_camera_id" not in existing_indexes:
+        op.create_index("ix_recordings_camera_id", "recordings", ["camera_id"])
+    if "ix_recordings_started_at" not in existing_indexes:
+        op.create_index("ix_recordings_started_at", "recordings", ["started_at"])
+
+    existing_indexes = {idx['name'] for idx in insp.get_indexes('motion_events')}
+    if "ix_motion_events_camera_id" not in existing_indexes:
+        op.create_index("ix_motion_events_camera_id", "motion_events", ["camera_id"])
+    if "ix_motion_events_started_at" not in existing_indexes:
+        op.create_index("ix_motion_events_started_at", "motion_events", ["started_at"])
+
+    print("Partitioning migration completed successfully.")
 
 
 def downgrade() -> None:
@@ -141,11 +165,9 @@ def downgrade() -> None:
 
     print("Reverting monthly partitioning...")
 
-    # Rename current partitioned tables
     op.rename_table("motion_events", "motion_events_part")
     op.rename_table("recordings", "recordings_part")
 
-    # Re-create original non-partitioned recordings table
     op.create_table(
         'recordings',
         sa.Column('id', sa.BigInteger(), primary_key=True, autoincrement=True),
@@ -163,13 +185,11 @@ def downgrade() -> None:
     op.create_index(op.f('ix_recordings_camera_id'), 'recordings', ['camera_id'])
     op.create_index(op.f('ix_recordings_started_at'), 'recordings', ['started_at'])
 
-    # Copy data back
     op.execute("""
         INSERT INTO recordings (id, camera_id, file_path, file_size_mb, started_at, ended_at, duration_s, codec, is_protected, is_encoded_av1, created_at)
         SELECT id, camera_id, file_path, file_size_mb, started_at, ended_at, duration_s, codec, is_protected, is_encoded_av1, created_at FROM recordings_part;
     """)
 
-    # Re-create original non-partitioned motion_events table
     op.create_table(
         'motion_events',
         sa.Column('id', sa.BigInteger(), primary_key=True, autoincrement=True),
@@ -188,12 +208,12 @@ def downgrade() -> None:
     op.create_index(op.f('ix_motion_events_camera_id'), 'motion_events', ['camera_id'])
     op.create_index(op.f('ix_motion_events_started_at'), 'motion_events', ['started_at'])
 
-    # Copy data back
     op.execute("""
         INSERT INTO motion_events (id, camera_id, recording_id, zone_name, started_at, ended_at, duration_s, snapshot_path, video_offset_s, severity, notified, created_at)
         SELECT id, camera_id, recording_id, zone_name, started_at, ended_at, duration_s, snapshot_path, video_offset_s, severity, notified, created_at FROM motion_events_part;
     """)
 
-    # Drop temporary partitioned tables and their children partitions
+    op.execute("ALTER SEQUENCE motion_events_id_seq OWNED BY NONE;")
+    op.execute("ALTER SEQUENCE recordings_id_seq OWNED BY NONE;")
     op.execute("DROP TABLE motion_events_part CASCADE;")
     op.execute("DROP TABLE recordings_part CASCADE;")
