@@ -7,7 +7,7 @@ CRUD kamera + snapshot + test koneksi RTSP + import batch
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from pathlib import Path
-import time, subprocess, logging, re
+import time, subprocess, logging, re, asyncio
 from datetime import datetime, timezone
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
@@ -88,20 +88,85 @@ def _extract_ip(rtsp_url: str) -> str:
     return m.group(1) if m else ""
 
 
-def _extract_credentials(rtsp_url: str) -> tuple[str, str]:
+def _extract_credentials(rtsp_url: str) -> tuple:
     """
     Ekstrak username dan password dari URL RTSP.
     Format: rtsp://username:password@ip:port/path
-    Return: (username, password) — fallback ke ("admin", "") jika tidak ada.
+    Return: (username, password) - fallback ke ("admin", "") jika tidak ada.
     """
     m = re.match(r"rtsp://([^:@]+):([^@]*)@", rtsp_url or "")
     if m:
         return m.group(1), m.group(2)
-    # Coba tanpa password: rtsp://username@ip...
     m2 = re.match(r"rtsp://([^:@]+)@", rtsp_url or "")
     if m2:
         return m2.group(1), ""
     return "admin", ""
+
+
+def _onvif_get_settings_sync(ip: str, port: int, username: str, password: str) -> dict:
+    """
+    Baca konfigurasi encoder kamera via ONVIF (synchronous).
+    Dipanggil via asyncio.to_thread agar tidak block event loop.
+    """
+    from onvif import ONVIFCamera
+    cam = ONVIFCamera(ip, port, username, password)
+    cam.update_xaddrs()
+    media = cam.create_media_service()
+    profiles = media.GetProfiles()
+
+    if not profiles:
+        raise ValueError("Tidak ada profile ONVIF ditemukan")
+
+    profile = profiles[0]
+    token = profile.token
+    enc = profile.VideoEncoderConfiguration
+
+    return {
+        "profile_token": token,
+        "codec": enc.Encoding if enc else None,
+        "width": enc.Resolution.Width if enc and enc.Resolution else None,
+        "height": enc.Resolution.Height if enc and enc.Resolution else None,
+        "fps": enc.RateControl.FrameRateLimit if enc and enc.RateControl else None,
+        "bitrate_kbps": enc.RateControl.BitrateLimit if enc and enc.RateControl else None,
+        "quality": enc.Quality if enc else None,
+    }
+
+
+def _onvif_set_settings_sync(
+    ip: str, port: int, username: str, password: str,
+    fps=None, bitrate_kbps=None, width=None, height=None, codec=None
+) -> None:
+    """
+    Kirim konfigurasi encoder ke kamera via ONVIF (synchronous).
+    Dipanggil via asyncio.to_thread agar tidak block event loop.
+    """
+    from onvif import ONVIFCamera
+    cam = ONVIFCamera(ip, port, username, password)
+    cam.update_xaddrs()
+    media = cam.create_media_service()
+    profiles = media.GetProfiles()
+
+    if not profiles:
+        raise ValueError("Tidak ada profile ONVIF ditemukan")
+
+    profile = profiles[0]
+    enc = profile.VideoEncoderConfiguration
+
+    request_body = media.create_type("SetVideoEncoderConfiguration")
+    request_body.Configuration = enc
+    request_body.ForcePersistence = True
+
+    if fps is not None:
+        enc.RateControl.FrameRateLimit = fps
+    if bitrate_kbps is not None:
+        enc.RateControl.BitrateLimit = bitrate_kbps
+    if width is not None and height is not None:
+        enc.Resolution.Width = width
+        enc.Resolution.Height = height
+    if codec is not None:
+        enc.Encoding = codec
+
+    media.SetVideoEncoderConfiguration(request_body)
 
 
 # ---------------------------------------------------------------------------
@@ -147,7 +212,6 @@ async def create_camera(
     if existing:
         raise HTTPException(status_code=409, detail=f"Kamera dengan ID '{body.id}' sudah ada")
 
-    # Default segment_duration ke 1800 (30 menit) jika belum diset
     data = body.model_dump()
     if "config_json" not in data or not data["config_json"]:
         data["config_json"] = {}
@@ -229,7 +293,6 @@ async def update_camera(
 
     update_data = body.model_dump(exclude_none=True)
 
-    # Tangani segment_duration: simpan ke config_json
     if "segment_duration" in update_data:
         seg = update_data.pop("segment_duration")
         if camera.config_json is None:
@@ -297,13 +360,7 @@ async def check_stream_ready(
     stream_type: str = "sub",
     _: User = Depends(get_current_user),
 ):
-    """
-    Cek apakah HLS stream kamera sudah siap (file .m3u8 ada dan segment pertama tersedia).
-    Frontend polling endpoint ini setelah add camera agar tidak tampilkan video hitam.
-    Return: {ready: bool, hls_path: str}
-    """
     hls_base = Path("/var/lib/nvr_cam/hls")
-    # Coba main dan sub tergantung stream_type
     candidates = [
         hls_base / camera_id / f"{stream_type}.m3u8",
         hls_base / camera_id / "sub.m3u8",
@@ -313,7 +370,6 @@ async def check_stream_ready(
     ]
     for m3u8 in candidates:
         if m3u8.exists() and m3u8.stat().st_size > 0:
-            # Pastikan minimal ada 1 segment .ts
             ts_files = list(m3u8.parent.glob("*.ts"))
             if ts_files:
                 return {"ready": True, "hls_path": str(m3u8)}
@@ -330,26 +386,16 @@ async def get_camera_storage_stats(
     db: AsyncSession = Depends(get_db),
     _: User = Depends(get_current_user),
 ):
-    """
-    Hitung statistik penggunaan storage untuk satu kamera:
-    - total_gb_used: total GB rekaman
-    - file_count: jumlah file rekaman
-    - avg_gb_per_day: rata-rata GB/hari dari data aktual
-    - estimated_gb_per_month: proyeksi GB/bulan
-    - avg_gb_per_hour: rata-rata GB/jam (per segment)
-    """
     from backend.db.base import AsyncSessionLocal
     from sqlalchemy import text
 
     try:
         async with AsyncSessionLocal() as session:
-            # Ambil info kamera
             repo = CameraRepository(session)
             camera = await repo.get_by_id(camera_id)
             if not camera:
                 raise HTTPException(status_code=404, detail="Kamera tidak ditemukan")
 
-            # Query rekaman dari DB
             result = await session.execute(
                 text("""
                     SELECT
@@ -368,7 +414,6 @@ async def get_camera_storage_stats(
             total_bytes = row.total_bytes or 0
             total_gb = total_bytes / (1024 ** 3)
 
-            # Hitung rata-rata per hari
             avg_gb_per_day = 0.0
             avg_gb_per_hour = 0.0
             if row.oldest and row.newest and file_count > 0:
@@ -402,10 +447,6 @@ async def get_all_cameras_storage_stats(
     db: AsyncSession = Depends(get_db),
     _: User = Depends(get_current_user),
 ):
-    """
-    Statistik storage untuk semua kamera sekaligus.
-    Return: [{camera_id, camera_name, total_gb_used, avg_gb_per_day, estimated_gb_per_month, ...}]
-    """
     from backend.db.base import AsyncSessionLocal
     from sqlalchemy import text
 
@@ -471,45 +512,26 @@ async def get_onvif_settings(
 ):
     """
     Baca konfigurasi encoder kamera saat ini via ONVIF.
-    Return: {fps, bitrate_kbps, width, height, codec, profile_token}
+    onvif-zeep adalah library synchronous, jadi dijalankan di thread pool
+    via asyncio.to_thread agar tidak memblokir event loop FastAPI.
     """
     repo = CameraRepository(db)
     camera = await repo.get_by_id(camera_id)
     if not camera:
         raise HTTPException(status_code=404, detail="Kamera tidak ditemukan")
 
+    ip = _extract_ip(camera.rtsp_main)
+    if not ip:
+        raise HTTPException(status_code=400, detail="Tidak dapat mengekstrak IP dari URL RTSP kamera")
+    username, password = _extract_credentials(camera.rtsp_main)
+
     try:
-        from onvif import ONVIFCamera
-
-        # Ekstrak IP dan credentials dari rtsp_main URL
-        ip = _extract_ip(camera.rtsp_main)
-        if not ip:
-            raise HTTPException(status_code=400, detail="Tidak dapat mengekstrak IP dari URL RTSP kamera")
-        username, password = _extract_credentials(camera.rtsp_main)
-
-        cam = ONVIFCamera(ip, 80, username, password)
-        await cam.update_xaddrs()
-        media = await cam.create_media_service()
-        profiles = await media.GetProfiles()
-
-        if not profiles:
-            raise HTTPException(status_code=404, detail="Tidak ada profile ONVIF ditemukan")
-
-        profile = profiles[0]
-        token = profile.token
-        enc = profile.VideoEncoderConfiguration
-
-        return {
-            "profile_token": token,
-            "codec": enc.Encoding if enc else None,
-            "width": enc.Resolution.Width if enc and enc.Resolution else None,
-            "height": enc.Resolution.Height if enc and enc.Resolution else None,
-            "fps": enc.RateControl.FrameRateLimit if enc and enc.RateControl else None,
-            "bitrate_kbps": enc.RateControl.BitrateLimit if enc and enc.RateControl else None,
-            "quality": enc.Quality if enc else None,
-        }
-    except HTTPException:
-        raise
+        result = await asyncio.to_thread(
+            _onvif_get_settings_sync, ip, 80, username, password
+        )
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         logger.error(f"ONVIF get settings error for {camera_id}: {e}")
         raise HTTPException(status_code=502, detail=f"Gagal membaca setting ONVIF: {e}")
@@ -525,76 +547,49 @@ async def set_onvif_settings(
 ):
     """
     Kirim setting encoder ke kamera via ONVIF.
-    Setelah berhasil, stream kamera akan di-restart.
-    Field yang None tidak diubah.
+    onvif-zeep adalah library synchronous, jadi dijalankan di thread pool
+    via asyncio.to_thread agar tidak memblokir event loop FastAPI.
     """
     repo = CameraRepository(db)
     camera = await repo.get_by_id(camera_id)
     if not camera:
         raise HTTPException(status_code=404, detail="Kamera tidak ditemukan")
 
+    ip = _extract_ip(camera.rtsp_main)
+    if not ip:
+        raise HTTPException(status_code=400, detail="Tidak dapat mengekstrak IP dari URL RTSP kamera")
+    default_username, default_password = _extract_credentials(camera.rtsp_main)
+    username = body.username or default_username
+    password = body.password or default_password
+
     try:
-        from onvif import ONVIFCamera
-
-        # Ekstrak IP dari rtsp_main; credentials bisa di-override dari body request
-        ip = _extract_ip(camera.rtsp_main)
-        if not ip:
-            raise HTTPException(status_code=400, detail="Tidak dapat mengekstrak IP dari URL RTSP kamera")
-        default_username, default_password = _extract_credentials(camera.rtsp_main)
-        username = body.username or default_username
-        password = body.password or default_password
-
-        cam = ONVIFCamera(ip, 80, username, password)
-        await cam.update_xaddrs()
-        media = await cam.create_media_service()
-        profiles = await media.GetProfiles()
-
-        if not profiles:
-            raise HTTPException(status_code=404, detail="Tidak ada profile ONVIF ditemukan")
-
-        profile = profiles[0]
-        enc = profile.VideoEncoderConfiguration
-
-        # Baca konfigurasi encoder yang ada, lalu update field yang diminta
-        request_body = media.create_type("SetVideoEncoderConfiguration")
-        request_body.Configuration = enc
-        request_body.ForcePersistence = True
-
-        if body.fps is not None:
-            enc.RateControl.FrameRateLimit = body.fps
-        if body.bitrate_kbps is not None:
-            enc.RateControl.BitrateLimit = body.bitrate_kbps
-        if body.width is not None and body.height is not None:
-            enc.Resolution.Width = body.width
-            enc.Resolution.Height = body.height
-        if body.codec is not None:
-            enc.Encoding = body.codec
-
-        await media.SetVideoEncoderConfiguration(request_body)
-
-        # Restart stream agar perubahan langsung berlaku
-        if request:
-            try:
-                recording_manager = request.app.state.recording_manager
-                await recording_manager.restart_camera(camera_id)
-            except Exception as re:
-                logger.warning(f"ONVIF settings applied, tapi recorder gagal restart: {re}")
-
-        await write_audit_log(
-            db, action="camera.onvif_settings", user_id=current_user.id,
-            target_type="camera", target_id=camera_id,
-            detail={"fps": body.fps, "bitrate_kbps": body.bitrate_kbps,
-                    "width": body.width, "height": body.height, "codec": body.codec},
-            ip_address=request.client.host if request and request.client else None,
+        await asyncio.to_thread(
+            _onvif_set_settings_sync,
+            ip, 80, username, password,
+            body.fps, body.bitrate_kbps, body.width, body.height, body.codec,
         )
-
-        return {"status": "ok", "message": "Setting ONVIF berhasil diterapkan ke kamera"}
-
-    except HTTPException:
-        raise
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         logger.error(f"ONVIF set settings error for {camera_id}: {e}")
         raise HTTPException(status_code=502, detail=f"Gagal mengirim setting ONVIF: {e}")
+
+    if request:
+        try:
+            recording_manager = request.app.state.recording_manager
+            await recording_manager.restart_camera(camera_id)
+        except Exception as re:
+            logger.warning(f"ONVIF settings applied, tapi recorder gagal restart: {re}")
+
+    await write_audit_log(
+        db, action="camera.onvif_settings", user_id=current_user.id,
+        target_type="camera", target_id=camera_id,
+        detail={"fps": body.fps, "bitrate_kbps": body.bitrate_kbps,
+                "width": body.width, "height": body.height, "codec": body.codec},
+        ip_address=request.client.host if request and request.client else None,
+    )
+
+    return {"status": "ok", "message": "Setting ONVIF berhasil diterapkan ke kamera"}
 
 
 # ---------------------------------------------------------------------------
