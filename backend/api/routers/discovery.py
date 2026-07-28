@@ -1,13 +1,14 @@
 """
 Discovery API Router
 
-Provides endpoints for discovering ONVIF cameras on the network.
-Filter: hanya tampilkan IP camera (ONVIF device type NetworkVideoTransmitter
-AU port RTSP 554 terbuka), exclude komputer/PC.
+Provides endpoints for discovering cameras on the network.
+Metode 1: ONVIF WS-Discovery
+Metode 2: RTSP port scan (554) — fallback jika ONVIF gagal
 """
 
 import asyncio
 import logging
+import ipaddress
 import socket
 from typing import List, Optional
 from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends
@@ -23,7 +24,6 @@ router = APIRouter(tags=["discovery"])
 
 # ---------------------------------------------------------------------------
 # Known camera vendor OUI prefixes (3 hex bytes of MAC)
-# Source: IEEE OUI registry — major IP camera manufacturers
 # ---------------------------------------------------------------------------
 CAMERA_VENDOR_OUIS = {
     # Dahua
@@ -48,7 +48,6 @@ CAMERA_VENDOR_OUIS = {
 
 
 def _is_camera_by_oui(mac: Optional[str]) -> bool:
-    """Return True jika 3 byte pertama MAC address cocok dengan vendor kamera."""
     if not mac:
         return False
     normalized = mac.lower().replace("-", ":")
@@ -56,12 +55,12 @@ def _is_camera_by_oui(mac: Optional[str]) -> bool:
     return prefix in CAMERA_VENDOR_OUIS
 
 
-async def _check_rtsp_port(ip: str, port: int = 554, timeout: float = 2.0) -> bool:
-    """Cek apakah port RTSP (554) terbuka di IP tersebut."""
-    loop = asyncio.get_event_loop()
+async def _check_port_open(ip: str, port: int = 554, timeout: float = 1.5) -> bool:
+    """Cek apakah port terbuka di IP tersebut."""
     try:
-        conn = asyncio.open_connection(ip, port)
-        reader, writer = await asyncio.wait_for(conn, timeout=timeout)
+        reader, writer = await asyncio.wait_for(
+            asyncio.open_connection(ip, port), timeout=timeout
+        )
         writer.close()
         try:
             await writer.wait_closed()
@@ -72,28 +71,58 @@ async def _check_rtsp_port(ip: str, port: int = 554, timeout: float = 2.0) -> bo
         return False
 
 
+async def _scan_rtsp_subnet(network: str, timeout: float = 1.5, max_concurrent: int = 50) -> List[dict]:
+    """
+    Scan seluruh subnet untuk host dengan port RTSP 554 terbuka.
+    Lebih cepat dari ONVIF karena hanya cek TCP port, tidak butuh ONVIF support.
+    """
+    try:
+        net = ipaddress.ip_network(network, strict=False)
+    except ValueError as e:
+        raise ValueError(f"Network tidak valid: {e}")
+
+    hosts = list(net.hosts())
+    if len(hosts) > 1024:
+        raise ValueError("Network terlalu besar, maksimal /22 (1024 host)")
+
+    semaphore = asyncio.Semaphore(max_concurrent)
+
+    async def check(ip_obj):
+        ip = str(ip_obj)
+        async with semaphore:
+            open_554 = await _check_port_open(ip, 554, timeout)
+            if open_554:
+                return {"ip": ip, "port": 554, "method": "rtsp_scan", "is_camera": True}
+            return None
+
+    results = await asyncio.gather(*[check(h) for h in hosts])
+    return [r for r in results if r is not None]
+
+
 def _is_likely_camera(cam: dict) -> bool:
-    """
-    Filter berlapis untuk memastikan device adalah IP camera, bukan PC/server.
-
-    Lulus jika:
-    1. onvif_support = True (respond WS-Discovery sebagai NetworkVideoTransmitter), ATAU
-    2. MAC address cocok dengan OUI vendor kamera terkenal
-
-    Tidak lulus jika:
-    - Tidak punya RTSP URL dan tidak punya onvif_support
-    """
     onvif = cam.get("onvif_support") or cam.get("onvif") or False
     mac = cam.get("mac_address") or cam.get("mac")
-
     if onvif:
         return True
     if _is_camera_by_oui(mac):
         return True
-    # Fallback: punya rtsp_url → kemungkinan besar kamera
     if cam.get("rtsp_url"):
         return True
     return False
+
+
+def _get_local_network() -> Optional[str]:
+    """Coba deteksi subnet lokal secara otomatis."""
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        local_ip = s.getsockname()[0]
+        s.close()
+        # Asumsikan /24
+        parts = local_ip.split(".")
+        return f"{parts[0]}.{parts[1]}.{parts[2]}.0/24"
+    except Exception:
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -101,16 +130,11 @@ def _is_likely_camera(cam: dict) -> bool:
 # ---------------------------------------------------------------------------
 
 class DiscoveryRequest(BaseModel):
-    network: Optional[str] = Field(
-        None,
-        description="Network CIDR (e.g., '192.168.1.0/24'). Default: subnet lokal."
-    )
+    network: Optional[str] = Field(None, description="Network CIDR (e.g., '192.168.1.0/24'). Default: subnet lokal.")
     timeout: float = Field(5.0, ge=1.0, le=30.0)
     ports: Optional[List[int]] = None
-    camera_only: bool = Field(
-        True,
-        description="Jika True, hanya tampilkan IP camera (filter PC/server)."
-    )
+    camera_only: bool = Field(True, description="Jika True, hanya tampilkan IP camera.")
+    method: str = Field("onvif", description="Metode scan: 'onvif' atau 'rtsp_scan'")
 
 
 class DiscoveredCamera(BaseModel):
@@ -123,6 +147,7 @@ class DiscoveredCamera(BaseModel):
     onvif_url: Optional[str] = None
     mac_address: Optional[str] = None
     is_camera: bool = True
+    method: Optional[str] = None
 
 
 class DiscoveryResponse(BaseModel):
@@ -131,6 +156,7 @@ class DiscoveryResponse(BaseModel):
     total_found: int
     filtered_out: int
     network_scanned: Optional[str] = None
+    method_used: str = "onvif"
 
 
 class DiscoveryStatus(BaseModel):
@@ -149,12 +175,10 @@ async def discover_onvif_cameras(
 ):
     """
     Temukan kamera IP di jaringan.
-    Gunakan camera_only=true (default) untuk exclude PC/server dari hasil.
 
-    Filter berlapis:
-    1. WS-Discovery device type NetworkVideoTransmitter (ONVIF)
-    2. MAC address OUI vendor kamera terkenal (Dahua, Hikvision, Axis, dll)
-    3. Memiliki RTSP URL dari ONVIF profile
+    method='onvif'     → WS-Discovery ONVIF (butuh kamera support ONVIF)
+    method='rtsp_scan' → Scan port 554 di seluruh subnet (lebih kompatibel,
+                         menemukan kamera non-ONVIF sekalipun)
     """
     global _discovery_status
 
@@ -165,6 +189,38 @@ async def discover_onvif_cameras(
     _discovery_status["cameras_found"] = 0
 
     try:
+        method = request.method.lower()
+
+        # ── Metode RTSP Port Scan ──────────────────────────────────────────
+        if method == "rtsp_scan":
+            network = request.network or _get_local_network()
+            if not network:
+                raise HTTPException(status_code=400, detail="Tidak bisa deteksi subnet lokal. Isi field 'network' secara manual (contoh: 192.168.1.0/24)")
+
+            raw = await _scan_rtsp_subnet(network, timeout=request.timeout)
+            total_found = len(raw)
+            _discovery_status["cameras_found"] = total_found
+
+            cameras = [
+                DiscoveredCamera(
+                    ip=c["ip"],
+                    port=c["port"],
+                    method="rtsp_scan",
+                    is_camera=True,
+                )
+                for c in raw
+            ]
+
+            return DiscoveryResponse(
+                cameras=cameras,
+                count=len(cameras),
+                total_found=total_found,
+                filtered_out=0,
+                network_scanned=network,
+                method_used="rtsp_scan",
+            )
+
+        # ── Metode ONVIF WS-Discovery ──────────────────────────────────────
         raw_cameras = await discover_cameras(
             network=request.network,
             timeout=request.timeout
@@ -172,7 +228,6 @@ async def discover_onvif_cameras(
 
         total_found = len(raw_cameras)
 
-        # Terapkan filter kamera-only jika diminta
         if request.camera_only:
             filtered = [cam for cam in raw_cameras if _is_likely_camera(cam)]
         else:
@@ -184,9 +239,8 @@ async def discover_onvif_cameras(
         cameras = []
         for cam in filtered:
             try:
-                cameras.append(DiscoveredCamera(**cam, is_camera=True))
+                cameras.append(DiscoveredCamera(**cam, is_camera=True, method="onvif"))
             except Exception:
-                # Jika field tidak cocok, coba manual
                 cameras.append(DiscoveredCamera(
                     ip=cam.get("ip", cam.get("ip_address", "")),
                     port=cam.get("port", 554),
@@ -197,6 +251,7 @@ async def discover_onvif_cameras(
                     onvif_url=cam.get("onvif_url"),
                     mac_address=cam.get("mac_address"),
                     is_camera=True,
+                    method="onvif",
                 ))
 
         return DiscoveryResponse(
@@ -205,7 +260,11 @@ async def discover_onvif_cameras(
             total_found=total_found,
             filtered_out=filtered_out,
             network_scanned=request.network,
+            method_used="onvif",
         )
+
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Camera discovery failed: {e}")
         raise HTTPException(status_code=500, detail=f"Discovery gagal: {str(e)}")
