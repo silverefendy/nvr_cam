@@ -7,7 +7,7 @@ CRUD kamera + snapshot + test koneksi RTSP + import batch
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from pathlib import Path
-import time, subprocess, logging
+import time, subprocess, logging, re
 from datetime import datetime, timezone
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
@@ -80,6 +80,28 @@ def _camera_to_dict(cam, recording_manager=None, camera_id: str = None) -> dict:
         camera_dict["status"] = "online" if is_online else "offline"
 
     return camera_dict
+
+
+def _extract_ip(rtsp_url: str) -> str:
+    """Ekstrak IP dari URL RTSP: rtsp://user:pass@192.168.1.x:554/..."""
+    m = re.search(r"@(\d+\.\d+\.\d+\.\d+)", rtsp_url or "")
+    return m.group(1) if m else ""
+
+
+def _extract_credentials(rtsp_url: str) -> tuple[str, str]:
+    """
+    Ekstrak username dan password dari URL RTSP.
+    Format: rtsp://username:password@ip:port/path
+    Return: (username, password) — fallback ke ("admin", "") jika tidak ada.
+    """
+    m = re.match(r"rtsp://([^:@]+):([^@]*)@", rtsp_url or "")
+    if m:
+        return m.group(1), m.group(2)
+    # Coba tanpa password: rtsp://username@ip...
+    m2 = re.match(r"rtsp://([^:@]+)@", rtsp_url or "")
+    if m2:
+        return m2.group(1), ""
+    return "admin", ""
 
 
 # ---------------------------------------------------------------------------
@@ -458,9 +480,12 @@ async def get_onvif_settings(
 
     try:
         from onvif import ONVIFCamera
-        ip = camera.ip_address or _extract_ip(camera.rtsp_main)
-        username = camera.username or "admin"
-        password = camera.password or ""
+
+        # Ekstrak IP dan credentials dari rtsp_main URL
+        ip = _extract_ip(camera.rtsp_main)
+        if not ip:
+            raise HTTPException(status_code=400, detail="Tidak dapat mengekstrak IP dari URL RTSP kamera")
+        username, password = _extract_credentials(camera.rtsp_main)
 
         cam = ONVIFCamera(ip, 80, username, password)
         await cam.update_xaddrs()
@@ -510,9 +535,14 @@ async def set_onvif_settings(
 
     try:
         from onvif import ONVIFCamera
-        ip = camera.ip_address or _extract_ip(camera.rtsp_main)
-        username = body.username or camera.username or "admin"
-        password = body.password or camera.password or ""
+
+        # Ekstrak IP dari rtsp_main; credentials bisa di-override dari body request
+        ip = _extract_ip(camera.rtsp_main)
+        if not ip:
+            raise HTTPException(status_code=400, detail="Tidak dapat mengekstrak IP dari URL RTSP kamera")
+        default_username, default_password = _extract_credentials(camera.rtsp_main)
+        username = body.username or default_username
+        password = body.password or default_password
 
         cam = ONVIFCamera(ip, 80, username, password)
         await cam.update_xaddrs()
@@ -523,9 +553,7 @@ async def set_onvif_settings(
             raise HTTPException(status_code=404, detail="Tidak ada profile ONVIF ditemukan")
 
         profile = profiles[0]
-        token = profile.token
         enc = profile.VideoEncoderConfiguration
-        enc_token = enc.token
 
         # Baca konfigurasi encoder yang ada, lalu update field yang diminta
         request_body = media.create_type("SetVideoEncoderConfiguration")
@@ -567,13 +595,6 @@ async def set_onvif_settings(
     except Exception as e:
         logger.error(f"ONVIF set settings error for {camera_id}: {e}")
         raise HTTPException(status_code=502, detail=f"Gagal mengirim setting ONVIF: {e}")
-
-
-def _extract_ip(rtsp_url: str) -> str:
-    """Ekstrak IP dari URL RTSP: rtsp://user:pass@192.168.1.x:554/..."""
-    import re
-    m = re.search(r"@([\d.]+)", rtsp_url or "")
-    return m.group(1) if m else ""
 
 
 # ---------------------------------------------------------------------------
