@@ -1,9 +1,9 @@
 # Makefile — nvr_cam
 # Shortcut perintah sehari-hari
 # Usage: make <target>
-# Contoh: make dev | make test | make deploy
+# Contoh: make dev | make up | make test | make deploy
 
-.PHONY: help dev stop test build logs shell-backend shell-db deploy clean
+.PHONY: help dev up prod-build prod-stop prod-logs stop test build logs shell-backend shell-db deploy clean
 
 # Default: tampilkan help
 help:
@@ -13,11 +13,17 @@ help:
 	@echo ""
 	@echo "  DEVELOPMENT (lokal)"
 	@echo "  make dev          Jalankan stack lokal (DB + Backend + Frontend)"
-	@echo "  make stop         Stop semua container"
-	@echo "  make logs         Lihat log semua service"
+	@echo "  make stop         Stop semua container dev"
+	@echo "  make logs         Lihat log semua service dev"
 	@echo "  make logs-backend Lihat log backend saja"
 	@echo "  make shell-backend Masuk ke container backend"
 	@echo "  make shell-db     Masuk ke psql"
+	@echo ""
+	@echo "  PRODUCTION (docker-compose.yml)"
+	@echo "  make up           Build + jalankan stack production"
+	@echo "  make prod-build   Hanya build image production"
+	@echo "  make prod-stop    Stop stack production"
+	@echo "  make prod-logs    Lihat log stack production"
 	@echo ""
 	@echo "  TESTING"
 	@echo "  make test         Jalankan semua local test (python + frontend + flutter)"
@@ -25,7 +31,7 @@ help:
 	@echo "  make test-build   Hanya frontend build check"
 	@echo ""
 	@echo "  BUILD"
-	@echo "  make build        Build semua docker image"
+	@echo "  make build        Build semua docker image (dev)"
 	@echo "  make build-apk    Build Flutter APK (butuh Flutter CLI)"
 	@echo ""
 	@echo "  DEPLOY"
@@ -66,6 +72,33 @@ shell-backend:
 
 shell-db:
 	docker compose -f docker-compose.dev.yml exec db psql -U nvr_user -d nvr_cam
+
+# ---- Production ----
+
+up:
+	@echo "🚀 Menjalankan stack production..."
+	@[ -f .env ] || (cp .env.example .env && echo "⚠️  .env dibuat dari .env.example — edit sesuai kebutuhan")
+	docker compose build
+	docker compose up -d
+	@echo ""
+	@echo "✅ Stack production berjalan:"
+	@echo "   Frontend : http://localhost:3000"
+	@echo "   Backend  : http://localhost:8000"
+	@echo "   API Docs : http://localhost:8000/api/docs"
+	@echo "   Database : localhost:5432"
+	@echo ""
+	@echo "Log: make prod-logs"
+
+prod-build:
+	@echo "🔨 Build image production..."
+	@[ -f .env ] || (cp .env.example .env && echo "⚠️  .env dibuat dari .env.example — edit sesuai kebutuhan")
+	docker compose build
+
+prod-stop:
+	docker compose down
+
+prod-logs:
+	docker compose logs -f
 
 # ---- Testing ----
 
