@@ -23,14 +23,10 @@ pyyaml==6.0.2
 opencv-python-headless==4.10.0.84
 numpy==1.26.4
 
-# ONVIF camera control
-onvif-zeep==0.2.12
-zeep==4.2.1
-
-# Notifications
+# HTTP client (dipakai oleh onvif_scanner dan notifier)
 aiohttp==3.10.0
 
-# Utilities
+# Notifications & utilities
 psutil==6.0.0
 schedule==1.2.2
 structlog==24.4.0

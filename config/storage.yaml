@@ -1,15 +1,25 @@
 # Konfigurasi storage NVR
-# Sesuaikan path drive dengan yang ada di server Ubuntu
+# Edit path drive sesuai mount point aktual di server/container Anda.
+#
+# Cara setting:
+#   Docker dev : gunakan volume 'nvr_recordings' (default /mnt/driveA di container)
+#   Production : mount HDD ke /mnt/driveA, /mnt/driveB, dst.
+#
+# Gunakan endpoint GET /api/v1/storage/browse untuk melihat folder yang tersedia
+# di dalam container sebelum mengisi path di sini.
 
 threshold_pct: 10          # Cleanup otomatis jika sisa disk < 10%
 
 drives:
-  - path: /mnt/driveE      # Sesuaikan dengan mount point aktual di server
-    cameras:
-      - cam_02
-      - cam_03
+  - path: /mnt/driveA      # Volume Docker default (nvr_recordings)
+    name: Drive A
+    cameras: []             # Assign kamera via UI atau endpoint /drives/{path}/assign
 
-# Catatan:
-# - path harus sudah di-mount di server Ubuntu (cek: df -h)
-# - Jika drive berbeda per kamera, tambah entry drive baru
-# - threshold_pct: angka persentase sisa disk yang memicu cleanup
+# Contoh konfigurasi multi-drive (production):
+# drives:
+#   - path: /mnt/driveA
+#     name: "HDD 1 — Cam Pintu"
+#     cameras: [cam_01, cam_02, cam_03]
+#   - path: /mnt/driveB
+#     name: "HDD 2 — Cam Parkir"
+#     cameras: [cam_04, cam_05]
