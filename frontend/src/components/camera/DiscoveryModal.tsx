@@ -8,16 +8,32 @@ interface Props {
   onClose: () => void
 }
 
+type ScanMethod = 'onvif' | 'rtsp_scan'
+
+const METHOD_INFO: Record<ScanMethod, { label: string; desc: string; icon: string }> = {
+  onvif: {
+    icon: '📡',
+    label: 'ONVIF WS-Discovery',
+    desc: 'Kirim broadcast UDP ke jaringan. Kamera harus support ONVIF. Mungkin tidak berfungsi di Docker/Windows.',
+  },
+  rtsp_scan: {
+    icon: '🔎',
+    label: 'IP Range Scan',
+    desc: 'Scan satu per satu semua IP di subnet. Deteksi ONVIF (port 80/8080) dan Dahua (port 37777/37778). Lebih reliable di Docker.',
+  },
+}
 
 export function DiscoveryModal({ storageDrives, onClose }: Props) {
   const queryClient = useQueryClient()
 
   // --- scan state ---
+  const [method, setMethod]       = useState<ScanMethod>('rtsp_scan')
   const [network, setNetwork]     = useState('')
   const [timeout, setTimeout_]    = useState(5)
   const [results, setResults]     = useState<DiscoveredCamera[] | null>(null)
   const [scanError, setScanError] = useState('')
   const [isScanning, setIsScanning] = useState(false)
+  const [networkScanned, setNetworkScanned] = useState('')
 
   // --- add camera state ---
   const [adding, setAdding]       = useState<Record<string, boolean>>({})
@@ -29,6 +45,7 @@ export function DiscoveryModal({ storageDrives, onClose }: Props) {
     id: string; name: string; location: string
     username: string; password: string
     storage_drive: string; retention_days: number
+    use_suggested_rtsp: boolean
   }>>({})
 
   const abortRef = useRef<AbortController | null>(null)
@@ -40,18 +57,31 @@ export function DiscoveryModal({ storageDrives, onClose }: Props) {
     setAdded({})
     setAddError({})
     setFormData({})
+    setNetworkScanned('')
     setIsScanning(true)
     abortRef.current = new AbortController()
     try {
       const res = await discoveryApi.scan({
         network: network.trim() || undefined,
         timeout,
+        method,
+        camera_only: true,
       })
       setResults(res.cameras)
-      if (res.cameras.length === 0) setScanError('Tidak ada kamera ditemukan di jaringan.')
+      setNetworkScanned(res.network_scanned || '')
+      if (res.cameras.length === 0) {
+        setScanError(
+          method === 'rtsp_scan'
+            ? `Tidak ada kamera ditemukan di ${res.network_scanned || 'subnet lokal'}. Pastikan subnet benar dan kamera menyala.`
+            : 'Tidak ada kamera ONVIF ditemukan. Coba gunakan IP Range Scan untuk hasil lebih baik.'
+        )
+      }
     } catch (err: any) {
       if (err?.name === 'CanceledError') return
-      setScanError(err?.response?.data?.detail || 'Scan gagal. Periksa koneksi jaringan.')
+      const detail = err?.response?.data?.detail || ''
+      setScanError(
+        detail || 'Scan gagal. Coba isi Network CIDR secara manual (contoh: 10.1.0.0/24).'
+      )
     } finally {
       setIsScanning(false)
     }
@@ -65,7 +95,8 @@ export function DiscoveryModal({ storageDrives, onClose }: Props) {
   // --- Init form untuk kamera yang mau di-add ---
   const initForm = (cam: DiscoveredCamera) => {
     const key = `${cam.ip}:${cam.port}`
-    if (formData[key]) return // sudah ada
+    if (formData[key]) return
+    const hasSuggestedRtsp = !!(cam.suggested_rtsp_main || cam.rtsp_url)
     setFormData(prev => ({
       ...prev,
       [key]: {
@@ -76,6 +107,7 @@ export function DiscoveryModal({ storageDrives, onClose }: Props) {
         password:      '',
         storage_drive: storageDrives[0] || '',
         retention_days: 30,
+        use_suggested_rtsp: hasSuggestedRtsp,
       }
     }))
   }
@@ -95,26 +127,40 @@ export function DiscoveryModal({ storageDrives, onClose }: Props) {
     setAdding(p => ({ ...p, [key]: true }))
     setAddError(p => ({ ...p, [key]: '' }))
     try {
-      const rtsp_main = cam.rtsp_url ||
-        (f.username && f.password
-          ? `rtsp://${f.username}:${f.password}@${cam.ip}:${cam.port}/stream1`
-          : `rtsp://${cam.ip}:${cam.port}/stream1`)
+      // Gunakan suggested RTSP dari Dahua jika tersedia, fallback ke konstruksi manual
+      const rtsp_main = f.use_suggested_rtsp && (cam.suggested_rtsp_main || cam.rtsp_url)
+        ? (cam.suggested_rtsp_main || cam.rtsp_url)!.replace(
+            /rtsp:\/\/[^@]*@/,
+            `rtsp://${f.username}:${f.password}@`
+          )
+        : f.username && f.password
+          ? `rtsp://${f.username}:${f.password}@${cam.ip}:554/cam/realmonitor?channel=1&subtype=0`
+          : `rtsp://${cam.ip}:554/stream1`
+
+      const rtsp_sub = f.use_suggested_rtsp && cam.suggested_rtsp_sub
+        ? cam.suggested_rtsp_sub.replace(
+            /rtsp:\/\/[^@]*@/,
+            `rtsp://${f.username}:${f.password}@`
+          )
+        : undefined
 
       await apiClient.post('/config/cameras', {
         id:             f.id.trim().toUpperCase(),
         name:           f.name.trim(),
         location:       f.location.trim() || undefined,
         rtsp_main,
+        rtsp_sub,
         storage_drive:  f.storage_drive,
         retention_days: f.retention_days,
         config_json: {
-          ip_address: cam.ip,
-          port:       cam.port,
-          username:   f.username,
-          password:   f.password,
+          ip_address:   cam.ip,
+          port:         cam.port,
+          username:     f.username,
+          password:     f.password,
           manufacturer: cam.manufacturer,
-          model:      cam.model,
-          mac_address: cam.mac_address,
+          model:        cam.model,
+          mac_address:  cam.mac_address,
+          dahua_sdk:    cam.dahua_sdk,
         }
       })
 
@@ -139,7 +185,7 @@ export function DiscoveryModal({ storageDrives, onClose }: Props) {
       padding: '16px',
     }}>
       <div style={{
-        background: '#1e2535', borderRadius: 10, width: '100%', maxWidth: 740,
+        background: '#1e2535', borderRadius: 10, width: '100%', maxWidth: 780,
         maxHeight: '90vh', display: 'flex', flexDirection: 'column',
         boxShadow: '0 8px 40px rgba(0,0,0,0.6)',
         border: '1px solid #2d3a50',
@@ -152,7 +198,7 @@ export function DiscoveryModal({ storageDrives, onClose }: Props) {
           <div>
             <div style={{ color: '#fff', fontWeight: 600, fontSize: 15 }}>🔍 Cari Kamera Otomatis</div>
             <div style={{ color: '#64748b', fontSize: 12, marginTop: 2 }}>
-              Scan jaringan menggunakan protokol ONVIF
+              Scan jaringan — ONVIF WS-Discovery atau IP Range Scan
             </div>
           </div>
           <button onClick={onClose} style={{
@@ -161,29 +207,78 @@ export function DiscoveryModal({ storageDrives, onClose }: Props) {
           }}>✕</button>
         </div>
 
+        {/* Method Selector */}
+        <div style={{
+          padding: '12px 20px', borderBottom: '1px solid #2d3a50',
+          display: 'flex', gap: 10, flexShrink: 0,
+        }}>
+          {(Object.keys(METHOD_INFO) as ScanMethod[]).map(m => {
+            const info = METHOD_INFO[m]
+            const active = method === m
+            return (
+              <button
+                key={m}
+                onClick={() => setMethod(m)}
+                disabled={isScanning}
+                style={{
+                  flex: 1, padding: '10px 12px', textAlign: 'left',
+                  background: active ? 'rgba(37,99,235,0.18)' : '#0f1117',
+                  border: `1px solid ${active ? '#2563eb' : '#2d3a50'}`,
+                  borderRadius: 8, cursor: isScanning ? 'not-allowed' : 'pointer',
+                  transition: 'all 0.15s',
+                }}
+              >
+                <div style={{ color: active ? '#60a5fa' : '#94a3b8', fontSize: 13, fontWeight: 600 }}>
+                  {info.icon} {info.label}
+                  {m === 'rtsp_scan' && (
+                    <span style={{
+                      marginLeft: 6, fontSize: 10, background: '#166534',
+                      color: '#4ade80', padding: '1px 6px', borderRadius: 4,
+                    }}>Rekomendasi</span>
+                  )}
+                </div>
+                <div style={{ color: '#475569', fontSize: 11, marginTop: 3, lineHeight: 1.4 }}>
+                  {info.desc}
+                </div>
+              </button>
+            )
+          })}
+        </div>
+
         {/* Scan Controls */}
         <div style={{
-          padding: '16px 20px', borderBottom: '1px solid #2d3a50',
+          padding: '12px 20px', borderBottom: '1px solid #2d3a50',
           display: 'flex', gap: 10, alignItems: 'flex-end', flexShrink: 0, flexWrap: 'wrap',
         }}>
-          <div style={{ flex: 1, minWidth: 180 }}>
+          <div style={{ flex: 1, minWidth: 200 }}>
             <label style={{ color: '#94a3b8', fontSize: 11, display: 'block', marginBottom: 4 }}>
-              Network CIDR <span style={{ color: '#475569' }}>(opsional)</span>
+              Network CIDR
+              {method === 'rtsp_scan' && (
+                <span style={{ color: '#f59e0b', marginLeft: 4 }}>
+                  ⚠ Wajib diisi untuk IP Range Scan
+                </span>
+              )}
             </label>
             <input
               type="text"
-              placeholder="cth: 192.168.1.0/24"
+              placeholder={method === 'rtsp_scan' ? 'cth: 10.1.0.0/24 atau 192.168.1.0/24' : 'cth: 192.168.1.0/24 (opsional)'}
               value={network}
               onChange={e => setNetwork(e.target.value)}
               disabled={isScanning}
               style={{
-                width: '100%', background: '#0f1117', border: '1px solid #2d3a50',
+                width: '100%', background: '#0f1117',
+                border: `1px solid ${method === 'rtsp_scan' && !network ? '#92400e' : '#2d3a50'}`,
                 borderRadius: 6, padding: '6px 10px', color: '#e2e8f0', fontSize: 13,
                 outline: 'none', boxSizing: 'border-box',
               }}
             />
+            {method === 'rtsp_scan' && !network && (
+              <div style={{ color: '#f59e0b', fontSize: 10, marginTop: 3 }}>
+                Kosongkan untuk auto-detect subnet host (via host.docker.internal)
+              </div>
+            )}
           </div>
-          <div style={{ minWidth: 100 }}>
+          <div style={{ minWidth: 110 }}>
             <label style={{ color: '#94a3b8', fontSize: 11, display: 'block', marginBottom: 4 }}>
               Timeout (detik)
             </label>
@@ -202,14 +297,14 @@ export function DiscoveryModal({ storageDrives, onClose }: Props) {
           </div>
           {!isScanning ? (
             <button onClick={handleScan} style={{
-              padding: '7px 20px', background: '#2563eb', color: '#fff',
+              padding: '7px 22px', background: '#2563eb', color: '#fff',
               border: 'none', borderRadius: 6, fontSize: 13, cursor: 'pointer', fontWeight: 500,
             }}>
               Mulai Scan
             </button>
           ) : (
             <button onClick={handleStop} style={{
-              padding: '7px 20px', background: '#dc2626', color: '#fff',
+              padding: '7px 22px', background: '#dc2626', color: '#fff',
               border: 'none', borderRadius: 6, fontSize: 13, cursor: 'pointer', fontWeight: 500,
             }}>
               Stop
@@ -221,10 +316,14 @@ export function DiscoveryModal({ storageDrives, onClose }: Props) {
         <div style={{ flex: 1, overflowY: 'auto', padding: '16px 20px' }}>
           {isScanning && (
             <div style={{ textAlign: 'center', color: '#60a5fa', padding: '32px 0' }}>
-              <div style={{ fontSize: 28, marginBottom: 8 }}>📡</div>
-              <div style={{ fontSize: 13 }}>Sedang memindai jaringan…</div>
+              <div style={{ fontSize: 28, marginBottom: 8 }}>
+                {method === 'rtsp_scan' ? '🔎' : '📡'}
+              </div>
+              <div style={{ fontSize: 13 }}>
+                {method === 'rtsp_scan' ? 'Memindai IP satu per satu…' : 'Mengirim broadcast ONVIF…'}
+              </div>
               <div style={{ fontSize: 11, color: '#475569', marginTop: 4 }}>
-                {network || 'subnet lokal'} • timeout {timeout}s
+                {network || 'auto-detect subnet'} • timeout {timeout}s
               </div>
             </div>
           )}
@@ -235,6 +334,11 @@ export function DiscoveryModal({ storageDrives, onClose }: Props) {
               borderRadius: 6, padding: '10px 14px', color: '#fca5a5', fontSize: 13,
             }}>
               ⚠️ {scanError}
+              {method === 'onvif' && (
+                <div style={{ marginTop: 8, color: '#94a3b8', fontSize: 12 }}>
+                  💡 Coba ganti ke <strong style={{ color: '#60a5fa' }}>IP Range Scan</strong> — lebih reliable di Docker/Windows.
+                </div>
+              )}
             </div>
           )}
 
@@ -242,6 +346,9 @@ export function DiscoveryModal({ storageDrives, onClose }: Props) {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
               <div style={{ color: '#22c55e', fontSize: 12, marginBottom: 4 }}>
                 ✅ {results.length} kamera ditemukan
+                {networkScanned && (
+                  <span style={{ color: '#475569', marginLeft: 8 }}>di {networkScanned}</span>
+                )}
               </div>
               {results.map(cam => {
                 const key = `${cam.ip}:${cam.port}`
@@ -259,11 +366,20 @@ export function DiscoveryModal({ storageDrives, onClose }: Props) {
                     {/* Info kamera */}
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 8 }}>
                       <div>
-                        <div style={{ color: '#e2e8f0', fontWeight: 500, fontSize: 13 }}>
-                          {cam.manufacturer || 'Unknown'} {cam.model || ''}
-                          {cam.name && cam.name !== cam.model && (
-                            <span style={{ color: '#64748b', fontWeight: 400 }}> — {cam.name}</span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <span style={{ color: '#e2e8f0', fontWeight: 500, fontSize: 13 }}>
+                            {cam.manufacturer || 'Unknown'} {cam.model || ''}
+                          </span>
+                          {cam.dahua_sdk && (
+                            <span style={{
+                              fontSize: 10, background: '#1e3a5f', color: '#60a5fa',
+                              padding: '1px 6px', borderRadius: 4,
+                            }}>Dahua SDK</span>
                           )}
+                          <span style={{
+                            fontSize: 10, background: '#1a2a1a', color: '#4ade80',
+                            padding: '1px 6px', borderRadius: 4,
+                          }}>{cam.method || 'onvif'}</span>
                         </div>
                         <div style={{ color: '#60a5fa', fontSize: 12, fontFamily: 'monospace', marginTop: 2 }}>
                           {cam.ip}:{cam.port}
@@ -273,9 +389,9 @@ export function DiscoveryModal({ storageDrives, onClose }: Props) {
                             MAC: {cam.mac_address}
                           </div>
                         )}
-                        {cam.rtsp_url && (
-                          <div style={{ color: '#475569', fontSize: 11, marginTop: 1 }}>
-                            RTSP: {cam.rtsp_url}
+                        {(cam.suggested_rtsp_main || cam.rtsp_url) && (
+                          <div style={{ color: '#475569', fontSize: 11, marginTop: 1, fontFamily: 'monospace' }}>
+                            RTSP: {cam.suggested_rtsp_main || cam.rtsp_url}
                           </div>
                         )}
                       </div>
@@ -351,6 +467,25 @@ export function DiscoveryModal({ storageDrives, onClose }: Props) {
                           </div>
                         </div>
 
+                        {/* Opsi RTSP Dahua jika tersedia */}
+                        {(cam.suggested_rtsp_main || cam.rtsp_url) && (
+                          <div style={{ marginTop: 8 }}>
+                            <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+                              <input
+                                type="checkbox"
+                                checked={form.use_suggested_rtsp}
+                                onChange={e => updateForm(key, 'use_suggested_rtsp', e.target.checked)}
+                              />
+                              <span style={{ color: '#94a3b8', fontSize: 11 }}>
+                                Gunakan RTSP URL format Dahua
+                                <span style={{ color: '#475569', marginLeft: 4, fontFamily: 'monospace', fontSize: 10 }}>
+                                  {cam.suggested_rtsp_main || cam.rtsp_url}
+                                </span>
+                              </span>
+                            </label>
+                          </div>
+                        )}
+
                         {err && (
                           <div style={{ color: '#f87171', fontSize: 11, marginTop: 6 }}>⚠️ {err}</div>
                         )}
@@ -383,7 +518,13 @@ export function DiscoveryModal({ storageDrives, onClose }: Props) {
 
           {!isScanning && results === null && !scanError && (
             <div style={{ textAlign: 'center', color: '#475569', padding: '32px 0', fontSize: 13 }}>
-              Klik <strong style={{ color: '#94a3b8' }}>Mulai Scan</strong> untuk mencari kamera ONVIF di jaringan lokal.
+              <div style={{ marginBottom: 8, fontSize: 22 }}>🔎</div>
+              Pilih metode scan di atas, isi Network CIDR jika perlu, lalu klik{' '}
+              <strong style={{ color: '#94a3b8' }}>Mulai Scan</strong>.
+              <div style={{ marginTop: 10, fontSize: 11, color: '#334155' }}>
+                Untuk Docker/Windows, gunakan <strong style={{ color: '#60a5fa' }}>IP Range Scan</strong>{' '}
+                dan isi subnet kamera (cth: <code style={{ color: '#4ade80' }}>10.1.0.0/24</code>).
+              </div>
             </div>
           )}
         </div>
@@ -391,8 +532,11 @@ export function DiscoveryModal({ storageDrives, onClose }: Props) {
         {/* Footer */}
         <div style={{
           padding: '12px 20px', borderTop: '1px solid #2d3a50',
-          display: 'flex', justifyContent: 'flex-end', flexShrink: 0,
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0,
         }}>
+          <div style={{ fontSize: 11, color: '#334155' }}>
+            💡 Docker/Windows: IP Range Scan lebih reliable dari ONVIF WS-Discovery
+          </div>
           <button onClick={onClose} style={{
             padding: '6px 18px', background: '#1e2535', color: '#94a3b8',
             border: '1px solid #334155', borderRadius: 6, fontSize: 13, cursor: 'pointer',

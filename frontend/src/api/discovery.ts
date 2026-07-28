@@ -1,9 +1,11 @@
-﻿import { apiClient } from './client'
+import { apiClient } from './client'
 
 export interface DiscoveryRequest {
   network?: string
   timeout?: number
   ports?: number[]
+  method?: 'onvif' | 'rtsp_scan'
+  camera_only?: boolean
 }
 
 export interface DiscoveredCamera {
@@ -15,12 +17,19 @@ export interface DiscoveredCamera {
   rtsp_url?: string
   onvif_url?: string
   mac_address?: string
+  dahua_sdk?: boolean
+  suggested_rtsp_main?: string
+  suggested_rtsp_sub?: string
+  method?: string
 }
 
 export interface DiscoveryResponse {
   cameras: DiscoveredCamera[]
   count: number
+  total_found: number
+  filtered_out: number
   network_scanned?: string
+  method_used: string
 }
 
 export interface DiscoveryStatus {

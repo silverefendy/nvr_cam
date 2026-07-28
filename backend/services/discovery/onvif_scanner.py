@@ -15,6 +15,11 @@ Dahua port notes:
   - 37778 = Dahua RTSP alternatif
   Kita probe ONVIF HTTP di port 80 meski RTSP-nya di 37778.
   Port 37777/37778 dipakai untuk deteksi keberadaan device Dahua saja.
+
+Docker/Windows note:
+  Di Docker Desktop (Windows), network_mode: host tidak efektif.
+  Subnet lokal dideteksi via host.docker.internal (extra_hosts di compose)
+  agar scan diarahkan ke LAN fisik, bukan Docker bridge (172.x.x.x).
 """
 
 import asyncio
@@ -41,6 +46,9 @@ DAHUA_DETECT_PORTS = [37777, 37778]
 
 # Semua port yang di-scan untuk keberadaan device
 ALL_SCAN_PORTS = ONVIF_HTTP_PORTS + DAHUA_DETECT_PORTS
+
+# Hostname Docker untuk akses host machine (dikonfigurasi via extra_hosts di compose)
+DOCKER_HOST_ALIAS = "host.docker.internal"
 
 
 @dataclass
@@ -379,11 +387,41 @@ class ONVIFScanner:
     # Helpers
     # ─────────────────────────────────────────────────────────────────────────
 
+    def _get_host_ip_via_docker_alias(self) -> Optional[str]:
+        """
+        Resolve IP host machine via host.docker.internal.
+        Hanya bekerja jika extra_hosts dikonfigurasi di docker-compose.yml.
+        Ini adalah cara yang reliable untuk mendapat IP host dari dalam container Docker.
+        """
+        try:
+            host_ip = socket.gethostbyname(DOCKER_HOST_ALIAS)
+            # Validasi: bukan loopback dan bukan Docker bridge
+            if not host_ip.startswith('127.') and not host_ip.startswith('172.'):
+                logger.info(f"Subnet terdeteksi via {DOCKER_HOST_ALIAS}: {host_ip}")
+                return host_ip
+        except Exception as e:
+            logger.debug(f"Gagal resolve {DOCKER_HOST_ALIAS}: {e}")
+        return None
+
     def _get_local_subnet(self) -> Optional[str]:
         """
-        Deteksi subnet lokal.
-        Prioritaskan interface non-Docker (hindari 172.x.x.x Docker bridge).
+        Deteksi subnet lokal dengan prioritas:
+        1. host.docker.internal — IP host machine (paling akurat di Docker)
+        2. netifaces — scan semua interface, skip Docker bridge (172.x)
+        3. Routing trick — fallback terakhir
+
+        Di Docker Desktop (Windows/Mac), container berjalan di bridge network
+        (172.x.x.x). Kita butuh IP host (10.x atau 192.168.x) agar scan
+        diarahkan ke subnet yang berisi kamera fisik.
         """
+        # Prioritas 1: host.docker.internal (paling akurat di Docker)
+        host_ip = self._get_host_ip_via_docker_alias()
+        if host_ip:
+            subnet = f"{host_ip.rsplit('.', 1)[0]}.0/24"
+            logger.info(f"Menggunakan subnet dari host.docker.internal: {subnet}")
+            return subnet
+
+        # Prioritas 2: netifaces (scan interface, skip Docker bridge)
         candidates = []
         try:
             import netifaces
@@ -392,30 +430,39 @@ class ONVIFScanner:
                 for addr in addrs:
                     ip = addr.get('addr', '')
                     netmask = addr.get('netmask', '255.255.255.0')
+                    # Skip loopback dan Docker bridge
                     if ip.startswith('127.') or ip.startswith('172.'):
-                        continue  # skip loopback dan Docker bridge
+                        continue
                     candidates.append((ip, netmask))
         except ImportError:
-            pass
+            logger.debug("netifaces tidak tersedia, skip")
 
-        if not candidates:
-            # Fallback: gunakan routing trick
-            try:
-                s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                s.connect(("8.8.8.8", 80))
-                local_ip = s.getsockname()[0]
-                s.close()
-                if not local_ip.startswith('172.'):
-                    candidates.append((local_ip, '255.255.255.0'))
-            except Exception as e:
-                logger.warning(f"Gagal deteksi subnet lokal: {e}")
-                return None
+        if candidates:
+            ip, _ = candidates[0]
+            subnet = f"{ip.rsplit('.', 1)[0]}.0/24"
+            logger.info(f"Menggunakan subnet dari netifaces: {subnet}")
+            return subnet
 
-        if not candidates:
-            return None
+        # Prioritas 3: routing trick fallback
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))
+            local_ip = s.getsockname()[0]
+            s.close()
+            if not local_ip.startswith('172.') and not local_ip.startswith('127.'):
+                subnet = f"{local_ip.rsplit('.', 1)[0]}.0/24"
+                logger.info(f"Menggunakan subnet dari routing trick: {subnet}")
+                return subnet
+            else:
+                logger.warning(
+                    f"IP lokal {local_ip} terdeteksi sebagai Docker bridge atau loopback. "
+                    "Tidak bisa otomatis deteksi subnet kamera. "
+                    "Isi field 'Network CIDR' secara manual di UI."
+                )
+        except Exception as e:
+            logger.warning(f"Gagal deteksi subnet lokal: {e}")
 
-        ip, _ = candidates[0]
-        return f"{ip.rsplit('.', 1)[0]}.0/24"
+        return None
 
 
 # ─────────────────────────────────────────────────────────────────────────────
