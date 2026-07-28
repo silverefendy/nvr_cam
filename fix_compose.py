@@ -2,40 +2,14 @@ path = "docker-compose.yml"
 with open(path, "r") as f:
     content = f.read()
 
-old = """  frontend:
-    build:
-      context: .
-      dockerfile: frontend/Dockerfile.frontend.prod
-    container_name: cctv_web
-    ports:
-      - "3000:80"
-    volumes:
-      - hls_data:/var/lib/nvr_cam/hls:ro
-      - snapshot_data:/var/lib/nvr_cam/snapshots:ro
-    depends_on:
-      - api
-    restart: unless-stopped"""
-
-new = """  frontend:
-    build:
-      context: .
-      dockerfile: frontend/Dockerfile.frontend.prod
-    container_name: cctv_web
-    ports:
-      - "3000:80"
-    volumes:
-      - hls_data:/var/lib/nvr_cam/hls:ro
-      - snapshot_data:/var/lib/nvr_cam/snapshots:ro
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    depends_on:
-      - api
-    restart: unless-stopped"""
+# Tambah ports mapping ke api service
+old = "    # ports: tidak dipakai saat network_mode: host\n    # Port API (8000) langsung tersedia di host"
+new = "    ports:\n      - \"8000:8000\""
 
 if old in content:
     content = content.replace(old, new)
     with open(path, "w") as f:
         f.write(content)
-    print("Done: extra_hosts added to frontend service")
+    print("Done: ports 8000:8000 added to api service")
 else:
-    print("ERROR: pattern not found, edit docker-compose.yml manually")
+    print("Pattern not found - edit manually")

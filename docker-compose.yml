@@ -34,7 +34,6 @@ services:
     #   3. Deteksi Dahua port 37777/37778
     # Konsekuensi: 'ports:' mapping tidak berlaku — port API langsung
     # terbuka di host pada APP_PORT (default 8000).
-    network_mode: host
     env_file:
       - path: .env
         required: false
@@ -64,10 +63,12 @@ services:
       - nvr_recordings:/mnt/driveA
       - hls_data:/var/lib/nvr_cam/hls
       - snapshot_data:/var/lib/nvr_cam/snapshots
-    # ports: tidak dipakai saat network_mode: host
-    # Port API (8000) langsung tersedia di host
+    ports:
+      - "8000:8000"
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    ports:
+      - "8000:8000"
     depends_on:
       db:
         condition: service_healthy
