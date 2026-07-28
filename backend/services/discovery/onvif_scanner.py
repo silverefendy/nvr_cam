@@ -3,12 +3,18 @@ ONVIF Camera Discovery Service
 
 Strategi scan berlapis:
   1. WS-Discovery UDP multicast (port 3702) — deteksi kamera yang aktif broadcast
-  2. Port scan + ONVIF probe per host (port 80, 8000, 8080) — untuk kamera Dahua
-     yang tidak respond multicast tapi punya ONVIF service di port HTTP biasa
+  2. Port scan + ONVIF probe per host — port standar (80, 8000, 8080)
+     DAN port Dahua (37777, 37778) untuk kamera/NVR Dahua
   3. Cek port RTSP 554 terbuka sebagai indikator tambahan
 
 UDP multicast dijalankan di thread pool (run_in_executor) agar tidak
 memblokir event loop — ini penting karena recvfrom() bersifat blocking.
+
+Dahua port notes:
+  - 37777 = Dahua SDK/proprietary protocol (NVR to camera)
+  - 37778 = Dahua RTSP alternatif
+  Kita probe ONVIF HTTP di port 80 meski RTSP-nya di 37778.
+  Port 37777/37778 dipakai untuk deteksi keberadaan device Dahua saja.
 """
 
 import asyncio
@@ -27,6 +33,15 @@ logger = logging.getLogger(__name__)
 # Thread pool khusus untuk operasi UDP blocking
 _UDP_EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix="ws-disc")
 
+# Port ONVIF standar
+ONVIF_HTTP_PORTS = [80, 8000, 8080]
+
+# Port Dahua SDK/RTSP alternatif — dipakai untuk deteksi, bukan ONVIF probe
+DAHUA_DETECT_PORTS = [37777, 37778]
+
+# Semua port yang di-scan untuk keberadaan device
+ALL_SCAN_PORTS = ONVIF_HTTP_PORTS + DAHUA_DETECT_PORTS
+
 
 @dataclass
 class DiscoveredCamera:
@@ -39,6 +54,9 @@ class DiscoveredCamera:
     onvif_url: Optional[str] = None
     mac_address: Optional[str] = None
     onvif_support: bool = False
+    dahua_sdk: bool = False          # True jika terdeteksi via port 37777/37778
+    suggested_rtsp_main: Optional[str] = None
+    suggested_rtsp_sub: Optional[str] = None
 
 
 class ONVIFScanner:
@@ -75,7 +93,7 @@ class ONVIFScanner:
         ports: List[int] = None,
     ) -> List[DiscoveredCamera]:
         if ports is None:
-            ports = [80, 8000, 8080]
+            ports = ALL_SCAN_PORTS  # include Dahua ports
 
         cameras: Dict[str, DiscoveredCamera] = {}
 
@@ -91,7 +109,7 @@ class ONVIFScanner:
         except Exception as e:
             logger.warning(f"WS-Discovery gagal: {e}")
 
-        # --- Langkah 2: Port scan + ONVIF probe ---
+        # --- Langkah 2: Port scan + ONVIF/Dahua probe ---
         if network is None:
             network = self._get_local_subnet()
 
@@ -112,6 +130,12 @@ class ONVIFScanner:
                         existing.onvif_url = cam.onvif_url
                     if not existing.rtsp_url and cam.rtsp_url:
                         existing.rtsp_url = cam.rtsp_url
+                    if cam.dahua_sdk:
+                        existing.dahua_sdk = True
+                    if cam.suggested_rtsp_main:
+                        existing.suggested_rtsp_main = cam.suggested_rtsp_main
+                    if cam.suggested_rtsp_sub:
+                        existing.suggested_rtsp_sub = cam.suggested_rtsp_sub
 
         logger.info(f"Total kamera unik ditemukan: {len(cameras)}")
         return list(cameras.values())
@@ -167,11 +191,9 @@ class ONVIFScanner:
             xaddrs_el = match.find('d:XAddrs', ns)
             xaddrs = xaddrs_el.text.strip() if xaddrs_el is not None and xaddrs_el.text else None
 
-            # Ambil port dari XAddrs jika ada (e.g. http://192.168.1.10:8080/onvif/device_service)
             port = 80
             onvif_url = None
             if xaddrs:
-                # Pakai URL pertama jika ada beberapa (spasi-delimited)
                 first_xaddr = xaddrs.split()[0]
                 onvif_url = first_xaddr
                 try:
@@ -193,29 +215,35 @@ class ONVIFScanner:
             return None
 
     # ─────────────────────────────────────────────────────────────────────────
-    # Port scan + ONVIF probe
+    # Port scan + ONVIF/Dahua probe
     # ─────────────────────────────────────────────────────────────────────────
 
     async def _port_scan(self, network: str, ports: List[int]) -> List[DiscoveredCamera]:
-        """Scan semua host di network, cek port ONVIF secara paralel."""
+        """Scan semua host di network, cek port secara paralel."""
         net = ip_network(network, strict=False)
         hosts = list(net.hosts())
-        # Batasi ke 254 host (1 subnet /24)
         if len(hosts) > 254:
             hosts = hosts[:254]
 
-        # Batasi konkurensi agar tidak flood network
         semaphore = asyncio.Semaphore(50)
 
-        async def _probe_with_sem(ip, port):
+        async def _probe_host(ip_str):
+            """Probe satu host: cek ONVIF ports dulu, lalu Dahua ports."""
             async with semaphore:
-                return await self._probe_onvif(str(ip), port)
+                # Cek ONVIF port standar
+                for port in ONVIF_HTTP_PORTS:
+                    result = await self._probe_onvif(ip_str, port)
+                    if result:
+                        return result
 
-        tasks = [
-            _probe_with_sem(host, port)
-            for host in hosts
-            for port in ports
-        ]
+                # Cek Dahua SDK/RTSP port
+                for port in DAHUA_DETECT_PORTS:
+                    if await self._check_tcp_port(ip_str, port, timeout=1.5):
+                        return self._build_dahua_camera(ip_str, port)
+
+                return None
+
+        tasks = [_probe_host(str(host)) for host in hosts]
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
         cameras = []
@@ -225,6 +253,48 @@ class ONVIFScanner:
                 cameras.append(r)
                 seen_ips.add(r.ip)
         return cameras
+
+    async def _check_tcp_port(self, ip: str, port: int, timeout: float = 1.5) -> bool:
+        """Cek apakah TCP port terbuka."""
+        try:
+            reader, writer = await asyncio.wait_for(
+                asyncio.open_connection(ip, port), timeout=timeout
+            )
+            writer.close()
+            try:
+                await writer.wait_closed()
+            except Exception:
+                pass
+            return True
+        except Exception:
+            return False
+
+    def _build_dahua_camera(self, ip: str, detected_port: int) -> DiscoveredCamera:
+        """
+        Bangun DiscoveredCamera untuk device Dahua yang terdeteksi via
+        port 37777 atau 37778.
+
+        Dahua NVR/kamera dengan port 37777 (SDK) atau 37778 (RTSP alt):
+        - ONVIF tetap di port 80
+        - RTSP main: port 554 (standar) atau 37778 (alt)
+        - Format URL Dahua: rtsp://user:pass@IP:554/cam/realmonitor?channel=1&subtype=0
+        """
+        is_sdk_port = detected_port == 37777
+        rtsp_port = 554 if is_sdk_port else detected_port  # 37778 bisa langsung jadi RTSP
+
+        suggested_main = f"rtsp://admin:@{ip}:{rtsp_port}/cam/realmonitor?channel=1&subtype=0"
+        suggested_sub  = f"rtsp://admin:@{ip}:{rtsp_port}/cam/realmonitor?channel=1&subtype=1"
+
+        return DiscoveredCamera(
+            ip=ip,
+            port=detected_port,
+            manufacturer="Dahua",
+            onvif_support=True,   # Dahua punya ONVIF di port 80
+            dahua_sdk=True,
+            rtsp_url=suggested_main,
+            suggested_rtsp_main=suggested_main,
+            suggested_rtsp_sub=suggested_sub,
+        )
 
     async def _probe_onvif(self, ip: str, port: int) -> Optional[DiscoveredCamera]:
         """
@@ -243,10 +313,8 @@ class ONVIFScanner:
             url = f"http://{ip}:{port}{path}"
             try:
                 async with aiohttp.ClientSession(timeout=timeout) as session:
-                    # ONVIF: GET akan mengembalikan 400/405 tapi host ada; POST tanpa auth = 401/400
                     async with session.get(url) as resp:
                         if resp.status in (200, 400, 401, 405):
-                            # Port open + path ada → coba GetDeviceInformation
                             info = await self._get_device_info(ip, port, path)
                             return info or DiscoveredCamera(
                                 ip=ip, port=port,
@@ -254,7 +322,6 @@ class ONVIFScanner:
                                 onvif_support=True,
                             )
             except (aiohttp.ClientConnectorError, asyncio.TimeoutError):
-                # Port closed atau timeout — stop coba path lain di port ini
                 break
             except Exception:
                 continue
@@ -284,7 +351,6 @@ class ONVIFScanner:
                         body = await resp.text()
                         if resp.status == 200:
                             return self._parse_device_info_xml(ip, port, url, body)
-                        # 401 = kamera ada tapi butuh auth
                         return DiscoveredCamera(
                             ip=ip, port=port,
                             onvif_url=url,
@@ -299,15 +365,12 @@ class ONVIFScanner:
         cam = DiscoveredCamera(ip=ip, port=port, onvif_url=onvif_url, onvif_support=True)
         try:
             root = ET.fromstring(xml_text)
-            # Cari tag tanpa namespace prefix untuk kompatibilitas
             for el in root.iter():
                 tag = el.tag.split('}')[-1] if '}' in el.tag else el.tag
                 if tag == 'Manufacturer' and el.text:
                     cam.manufacturer = el.text.strip()
                 elif tag == 'Model' and el.text:
                     cam.model = el.text.strip()
-                elif tag == 'FirmwareVersion' and el.text:
-                    pass  # bisa disimpan nanti jika perlu
         except Exception as e:
             logger.debug(f"Parse DeviceInfo XML error: {e}")
         return cam
@@ -317,15 +380,42 @@ class ONVIFScanner:
     # ─────────────────────────────────────────────────────────────────────────
 
     def _get_local_subnet(self) -> Optional[str]:
+        """
+        Deteksi subnet lokal.
+        Prioritaskan interface non-Docker (hindari 172.x.x.x Docker bridge).
+        """
+        candidates = []
         try:
-            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            s.connect(("8.8.8.8", 80))
-            local_ip = s.getsockname()[0]
-            s.close()
-            return f"{local_ip.rsplit('.', 1)[0]}.0/24"
-        except Exception as e:
-            logger.warning(f"Gagal deteksi subnet lokal: {e}")
+            import netifaces
+            for iface in netifaces.interfaces():
+                addrs = netifaces.ifaddresses(iface).get(netifaces.AF_INET, [])
+                for addr in addrs:
+                    ip = addr.get('addr', '')
+                    netmask = addr.get('netmask', '255.255.255.0')
+                    if ip.startswith('127.') or ip.startswith('172.'):
+                        continue  # skip loopback dan Docker bridge
+                    candidates.append((ip, netmask))
+        except ImportError:
+            pass
+
+        if not candidates:
+            # Fallback: gunakan routing trick
+            try:
+                s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                s.connect(("8.8.8.8", 80))
+                local_ip = s.getsockname()[0]
+                s.close()
+                if not local_ip.startswith('172.'):
+                    candidates.append((local_ip, '255.255.255.0'))
+            except Exception as e:
+                logger.warning(f"Gagal deteksi subnet lokal: {e}")
+                return None
+
+        if not candidates:
             return None
+
+        ip, _ = candidates[0]
+        return f"{ip.rsplit('.', 1)[0]}.0/24"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -349,6 +439,9 @@ async def discover_cameras(
             "onvif_url": cam.onvif_url,
             "mac_address": cam.mac_address,
             "onvif_support": cam.onvif_support,
+            "dahua_sdk": cam.dahua_sdk,
+            "suggested_rtsp_main": cam.suggested_rtsp_main,
+            "suggested_rtsp_sub": cam.suggested_rtsp_sub,
         }
         for cam in cameras
     ]

@@ -88,6 +88,12 @@ def _extract_ip(rtsp_url: str) -> str:
     return m.group(1) if m else ""
 
 
+def _extract_port(rtsp_url: str, default: int = 554) -> int:
+    """Ekstrak port dari URL RTSP."""
+    m = re.search(r"@[\d.]+:(\d+)", rtsp_url or "")
+    return int(m.group(1)) if m else default
+
+
 def _extract_credentials(rtsp_url: str) -> tuple:
     """
     Ekstrak username dan password dari URL RTSP.
@@ -101,6 +107,17 @@ def _extract_credentials(rtsp_url: str) -> tuple:
     if m2:
         return m2.group(1), ""
     return "admin", ""
+
+
+def _resolve_onvif_port(rtsp_port: int) -> int:
+    """
+    Dahua RTSP bisa pakai port 37778 (alternatif) atau 554 (standar).
+    ONVIF HTTP service Dahua selalu di port 80, independen dari port RTSP.
+    Tapi jika RTSP port adalah 37778 (Dahua SDK mode),
+    kita tetap probe ONVIF di port 80.
+    """
+    # Semua varian Dahua: ONVIF selalu di port 80
+    return 80
 
 
 def _onvif_get_settings_sync(ip: str, port: int, username: str, password: str) -> dict:
@@ -139,6 +156,10 @@ def _onvif_set_settings_sync(
     """
     Kirim konfigurasi encoder ke kamera via ONVIF (synchronous).
     Dipanggil via asyncio.to_thread agar tidak block event loop.
+
+    Fix: Beberapa kamera (Dahua, Hikvision lama) mengharuskan field Multicast
+    ada dalam SetVideoEncoderConfiguration meskipun nilainya None/kosong.
+    Kita inject struktur Multicast default jika tidak ada.
     """
     from onvif import ONVIFCamera
     cam = ONVIFCamera(ip, port, username, password)
@@ -165,6 +186,45 @@ def _onvif_set_settings_sync(
         enc.Resolution.Height = height
     if codec is not None:
         enc.Encoding = codec
+
+    # ── Fix: inject Multicast default jika None ────────────────────────────
+    # Beberapa kamera menolak SetVideoEncoderConfiguration jika Multicast
+    # tidak ada dalam request (error: Missing element Multicast).
+    # Kita set nilai default agar kamera tidak reject request.
+    try:
+        if not hasattr(enc, 'Multicast') or enc.Multicast is None:
+            # Buat object Multicast kosong via zeep type factory
+            multicast_type = media.zeep_client.get_type(
+                '{http://www.onvif.org/ver10/schema}MulticastConfiguration'
+            )
+            mc = multicast_type()
+            # Set field Address sebagai object kosong juga
+            addr_type = media.zeep_client.get_type(
+                '{http://www.onvif.org/ver10/schema}IPAddress'
+            )
+            mc.Address = addr_type(Type='IPv4', IPv4Address='0.0.0.0')
+            mc.Port = 0
+            mc.TTL = 0
+            mc.AutoStart = False
+            enc.Multicast = mc
+    except Exception as mc_err:
+        # Jika tidak bisa buat type factory (library version lama),
+        # coba pendekatan alternatif: set atribut langsung
+        logger.debug(f"Multicast type factory gagal, coba fallback: {mc_err}")
+        try:
+            if not hasattr(enc, 'Multicast') or enc.Multicast is None:
+                # Fallback: gunakan dict-like object
+                class _MC:
+                    class Address:
+                        Type = 'IPv4'
+                        IPv4Address = '0.0.0.0'
+                    Port = 0
+                    TTL = 0
+                    AutoStart = False
+                enc.Multicast = _MC()
+        except Exception:
+            pass  # Biarkan lanjut, mungkin kamera tidak butuh Multicast
+    # ───────────────────────────────────────────────────────────────────────
 
     media.SetVideoEncoderConfiguration(request_body)
 
@@ -346,7 +406,7 @@ async def delete_camera(
     await write_audit_log(
         db, action="camera.delete", user_id=current_user.id,
         target_type="camera", target_id=camera_id,
-        ip_address=request.client.host if request.client else None,
+        ip_address=request.client.host if request and request.client else None,
     )
 
 
@@ -524,10 +584,11 @@ async def get_onvif_settings(
     if not ip:
         raise HTTPException(status_code=400, detail="Tidak dapat mengekstrak IP dari URL RTSP kamera")
     username, password = _extract_credentials(camera.rtsp_main)
+    onvif_port = _resolve_onvif_port(_extract_port(camera.rtsp_main))
 
     try:
         result = await asyncio.to_thread(
-            _onvif_get_settings_sync, ip, 80, username, password
+            _onvif_get_settings_sync, ip, onvif_port, username, password
         )
         return result
     except ValueError as e:
@@ -547,8 +608,7 @@ async def set_onvif_settings(
 ):
     """
     Kirim setting encoder ke kamera via ONVIF.
-    onvif-zeep adalah library synchronous, jadi dijalankan di thread pool
-    via asyncio.to_thread agar tidak memblokir event loop FastAPI.
+    Fix: inject Multicast default jika kamera memerlukannya.
     """
     repo = CameraRepository(db)
     camera = await repo.get_by_id(camera_id)
@@ -561,11 +621,12 @@ async def set_onvif_settings(
     default_username, default_password = _extract_credentials(camera.rtsp_main)
     username = body.username or default_username
     password = body.password or default_password
+    onvif_port = _resolve_onvif_port(_extract_port(camera.rtsp_main))
 
     try:
         await asyncio.to_thread(
             _onvif_set_settings_sync,
-            ip, 80, username, password,
+            ip, onvif_port, username, password,
             body.fps, body.bitrate_kbps, body.width, body.height, body.codec,
         )
     except ValueError as e:

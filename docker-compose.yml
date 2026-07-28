@@ -27,13 +27,21 @@ services:
       context: .
       dockerfile: Dockerfile.backend
     container_name: cctv_api
+    # network_mode: host memungkinkan container akses langsung ke network
+    # interface host — wajib untuk:
+    #   1. WS-Discovery UDP multicast (port 3702) agar bisa reach kamera
+    #   2. Port scan ke subnet kamera (10.3.x.x, 192.168.x.x, dst)
+    #   3. Deteksi Dahua port 37777/37778
+    # Konsekuensi: 'ports:' mapping tidak berlaku — port API langsung
+    # terbuka di host pada APP_PORT (default 8000).
+    network_mode: host
     env_file:
       - path: .env
         required: false
       - path: .env.example
         required: false
     environment:
-      DB_HOST: ${DB_HOST:-db}
+      DB_HOST: ${DB_HOST:-127.0.0.1}   # host karena network_mode: host
       DB_PORT: ${DB_PORT:-5432}
       DB_NAME: ${DB_NAME:-nvr_cam}
       DB_USER: ${DB_USER:-nvr_user}
@@ -53,14 +61,11 @@ services:
     volumes:
       - ./config:/app/config
       - ./scripts:/app/scripts:ro
-      # Mount folder rekaman dari host — sesuaikan path dengan server production
-      # Contoh Linux: /mnt/nvr_recordings:/mnt/driveA
-      # Contoh Windows dev: menggunakan volume Docker di bawah
       - nvr_recordings:/mnt/driveA
       - hls_data:/var/lib/nvr_cam/hls
       - snapshot_data:/var/lib/nvr_cam/snapshots
-    ports:
-      - "8000:8000"
+    # ports: tidak dipakai saat network_mode: host
+    # Port API (8000) langsung tersedia di host
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
@@ -86,7 +91,4 @@ volumes:
   postgres_data:
   hls_data:
   snapshot_data:
-  # Volume dev untuk rekaman (production: ganti dengan bind mount ke folder HDD)
-  # Untuk production: edit volumes di atas dan tambahkan:
-  #   - /mnt/nvr_recordings:/mnt/driveA
   nvr_recordings:
