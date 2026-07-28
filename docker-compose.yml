@@ -40,7 +40,7 @@ services:
       - path: .env.example
         required: false
     environment:
-      DB_HOST: ${DB_HOST:-127.0.0.1}   # host karena network_mode: host
+      DB_HOST: ${DB_HOST:-db}   # gunakan nama service Docker untuk bridge network
       DB_PORT: ${DB_PORT:-5432}
       DB_NAME: ${DB_NAME:-nvr_cam}
       DB_USER: ${DB_USER:-nvr_user}
@@ -67,8 +67,6 @@ services:
       - "8000:8000"
     extra_hosts:
       - "host.docker.internal:host-gateway"
-    ports:
-      - "8000:8000"
     depends_on:
       db:
         condition: service_healthy
