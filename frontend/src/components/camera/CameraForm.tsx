@@ -32,10 +32,8 @@ const inputCls = "w-full px-3 py-2.5 rounded-xl bg-slate-50 border border-slate-
 const labelCls = "block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5"
 const dividerCls = "text-xs font-bold text-slate-400 uppercase tracking-widest mb-3 flex items-center gap-2"
 
-// Tab type
 type FormTab = 'basic' | 'onvif'
 
-// ONVIF settings state
 interface ONVIFState {
   fps: number
   bitrate_kbps: number
@@ -73,8 +71,6 @@ export const CameraForm: React.FC<Props> = ({ initialData, storageDrives, onSave
   const saveMutation = useMutation({
     mutationFn: async (data: CameraFormData) => {
       setErrorMsg(null)
-      // Kirim segment_duration sebagai bagian dari body
-      // Backend akan menyimpannya ke config_json
       if (data.id) {
         const res = await apiClient.put(`/config/cameras/${data.id}`, data)
         return res.data
@@ -119,7 +115,6 @@ export const CameraForm: React.FC<Props> = ({ initialData, storageDrives, onSave
     saveMutation.mutate(formData)
   }
 
-  // ONVIF: baca setting dari kamera
   const loadOnvifSettings = async () => {
     if (!formData.id) return
     setOnvif(s => ({ ...s, loading: true, error: null, success: null }))
@@ -140,7 +135,6 @@ export const CameraForm: React.FC<Props> = ({ initialData, storageDrives, onSave
     }
   }
 
-  // ONVIF: kirim setting ke kamera
   const saveOnvifSettings = async () => {
     if (!formData.id) return
     setOnvif(s => ({ ...s, saving: true, error: null, success: null }))
@@ -169,18 +163,19 @@ export const CameraForm: React.FC<Props> = ({ initialData, storageDrives, onSave
   ]
 
   return (
-    <div className="bg-white border border-slate-200 rounded-2xl shadow-sm max-w-2xl mx-auto overflow-hidden">
+    // FIX: flex column + max-h agar footer selalu terlihat dan isi bisa scroll
+    <div className="bg-white border border-slate-200 rounded-2xl shadow-sm max-w-2xl mx-auto overflow-hidden flex flex-col max-h-[90vh]">
       {/* Header */}
-      <div className="px-6 py-4 border-b border-slate-200 bg-slate-50">
+      <div className="px-6 py-4 border-b border-slate-200 bg-slate-50 flex-shrink-0">
         <h2 className="text-base font-bold text-slate-800">
           {formData.id ? '✏️ Edit Kamera' : '➕ Tambah Kamera Baru'}
         </h2>
         <p className="text-xs text-slate-400 mt-0.5">Isi informasi koneksi dan penyimpanan kamera</p>
       </div>
 
-      {/* Tab bar — hanya tampilkan ONVIF tab jika edit */}
+      {/* Tab bar */}
       {isEdit && (
-        <div className="flex border-b border-slate-200 bg-slate-50">
+        <div className="flex border-b border-slate-200 bg-slate-50 flex-shrink-0">
           {(['basic', 'onvif'] as FormTab[]).map(tab => (
             <button
               key={tab}
@@ -197,275 +192,274 @@ export const CameraForm: React.FC<Props> = ({ initialData, storageDrives, onSave
         </div>
       )}
 
-      {/* ─── TAB: Basic ─────────────────────────────────────────── */}
-      {activeTab === 'basic' && (
-        <div className="p-6 space-y-6">
-          {errorMsg && (
-            <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 flex items-start gap-2">
-              <span className="text-red-500 text-sm mt-0.5 flex-shrink-0">⚠️</span>
-              <pre className="text-red-700 text-xs whitespace-pre-wrap font-sans">{errorMsg}</pre>
-              <button onClick={() => setErrorMsg(null)} className="ml-auto text-red-400 hover:text-red-600 text-xs flex-shrink-0">✕</button>
-            </div>
-          )}
+      {/* Scrollable body */}
+      <div className="overflow-y-auto flex-1">
 
-          {/* Identitas */}
-          <div>
-            <div className={dividerCls}>
-              <span className="flex-1 h-px bg-slate-200" /><span>Identitas</span><span className="flex-1 h-px bg-slate-200" />
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className={labelCls}>Nama Kamera *</label>
-                <input type="text" value={formData.name} onChange={e => set('name', e.target.value)}
-                  placeholder="Pintu Masuk Utama" className={inputCls} />
+        {/* ─── TAB: Basic ─────────────────────────────────────────── */}
+        {activeTab === 'basic' && (
+          <div className="p-6 space-y-6">
+            {errorMsg && (
+              <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 flex items-start gap-2">
+                <span className="text-red-500 text-sm mt-0.5 flex-shrink-0">⚠️</span>
+                <pre className="text-red-700 text-xs whitespace-pre-wrap font-sans">{errorMsg}</pre>
+                <button onClick={() => setErrorMsg(null)} className="ml-auto text-red-400 hover:text-red-600 text-xs flex-shrink-0">✕</button>
               </div>
-              <div>
-                <label className={labelCls}>Lokasi</label>
-                <input type="text" value={formData.location || ''} onChange={e => set('location', e.target.value)}
-                  placeholder="Lantai 1, Lobby" className={inputCls} />
-              </div>
-            </div>
-          </div>
+            )}
 
-          {/* Jaringan */}
-          <div>
-            <div className={dividerCls}>
-              <span className="flex-1 h-px bg-slate-200" /><span>Jaringan &amp; Autentikasi</span><span className="flex-1 h-px bg-slate-200" />
-            </div>
-            <div className="grid grid-cols-3 gap-4 mb-4">
-              <div className="col-span-2">
-                <label className={labelCls}>IP Address *</label>
-                <input type="text" value={formData.ip_address} onChange={e => set('ip_address', e.target.value)}
-                  placeholder="192.168.1.101" className={inputCls} />
+            {/* Identitas */}
+            <div>
+              <div className={dividerCls}>
+                <span className="flex-1 h-px bg-slate-200" /><span>Identitas</span><span className="flex-1 h-px bg-slate-200" />
               </div>
-              <div>
-                <label className={labelCls}>Port</label>
-                <input type="number" value={formData.port} onChange={e => set('port', parseInt(e.target.value))}
-                  className={inputCls} />
-              </div>
-            </div>
-            <div className="grid grid-cols-3 gap-4">
-              <div>
-                <label className={labelCls}>Username</label>
-                <input type="text" value={formData.username} onChange={e => set('username', e.target.value)}
-                  className={inputCls} />
-              </div>
-              <div>
-                <label className={labelCls}>Password *</label>
-                <input type="password" value={formData.password} onChange={e => set('password', e.target.value)}
-                  placeholder="••••••••" className={inputCls} />
-              </div>
-              <div>
-                <label className={labelCls}>Channel</label>
-                <input type="number" value={formData.channel} onChange={e => set('channel', parseInt(e.target.value))}
-                  min="1" max="16" className={inputCls} />
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className={labelCls}>Nama Kamera *</label>
+                  <input type="text" value={formData.name} onChange={e => set('name', e.target.value)}
+                    placeholder="Pintu Masuk Utama" className={inputCls} />
+                </div>
+                <div>
+                  <label className={labelCls}>Lokasi</label>
+                  <input type="text" value={formData.location || ''} onChange={e => set('location', e.target.value)}
+                    placeholder="Lantai 1, Lobby" className={inputCls} />
+                </div>
               </div>
             </div>
-          </div>
 
-          {/* RTSP */}
-          <div>
-            <div className={dividerCls}>
-              <span className="flex-1 h-px bg-slate-200" /><span>RTSP Stream</span><span className="flex-1 h-px bg-slate-200" />
+            {/* Jaringan */}
+            <div>
+              <div className={dividerCls}>
+                <span className="flex-1 h-px bg-slate-200" /><span>Jaringan &amp; Autentikasi</span><span className="flex-1 h-px bg-slate-200" />
+              </div>
+              <div className="grid grid-cols-3 gap-4 mb-4">
+                <div className="col-span-2">
+                  <label className={labelCls}>IP Address *</label>
+                  <input type="text" value={formData.ip_address} onChange={e => set('ip_address', e.target.value)}
+                    placeholder="192.168.1.101" className={inputCls} />
+                </div>
+                <div>
+                  <label className={labelCls}>Port</label>
+                  <input type="number" value={formData.port} onChange={e => set('port', parseInt(e.target.value))}
+                    className={inputCls} />
+                </div>
+              </div>
+              <div className="grid grid-cols-3 gap-4">
+                <div>
+                  <label className={labelCls}>Username</label>
+                  <input type="text" value={formData.username} onChange={e => set('username', e.target.value)}
+                    className={inputCls} />
+                </div>
+                <div>
+                  <label className={labelCls}>Password *</label>
+                  <input type="password" value={formData.password} onChange={e => set('password', e.target.value)}
+                    placeholder="••••••••" className={inputCls} />
+                </div>
+                <div>
+                  <label className={labelCls}>Channel</label>
+                  <input type="number" value={formData.channel} onChange={e => set('channel', parseInt(e.target.value))}
+                    min="1" max="16" className={inputCls} />
+                </div>
+              </div>
             </div>
-            <div className="bg-slate-50 border border-slate-200 rounded-xl p-4">
-              <div className="flex items-center justify-between mb-3">
-                <span className="text-xs font-medium text-slate-500">URL Preview</span>
-                <label className="flex items-center gap-2 text-xs text-slate-500 cursor-pointer">
-                  <div className={`w-8 h-4 rounded-full transition-colors relative ${useCustomRTSP ? 'bg-sky-500' : 'bg-slate-300'}`}
-                    onClick={() => setUseCustomRTSP(v => !v)}>
-                    <div className={`absolute top-0.5 w-3 h-3 bg-white rounded-full shadow transition-transform ${useCustomRTSP ? 'translate-x-4' : 'translate-x-0.5'}`} />
+
+            {/* RTSP */}
+            <div>
+              <div className={dividerCls}>
+                <span className="flex-1 h-px bg-slate-200" /><span>RTSP Stream</span><span className="flex-1 h-px bg-slate-200" />
+              </div>
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <span className="text-xs font-medium text-slate-500">URL Preview</span>
+                  <label className="flex items-center gap-2 text-xs text-slate-500 cursor-pointer">
+                    <div className={`w-8 h-4 rounded-full transition-colors relative ${useCustomRTSP ? 'bg-sky-500' : 'bg-slate-300'}`}
+                      onClick={() => setUseCustomRTSP(v => !v)}>
+                      <div className={`absolute top-0.5 w-3 h-3 bg-white rounded-full shadow transition-transform ${useCustomRTSP ? 'translate-x-4' : 'translate-x-0.5'}`} />
+                    </div>
+                    Custom URL
+                  </label>
+                </div>
+                {useCustomRTSP ? (
+                  <div className="space-y-2">
+                    <input type="text" value={formData.rtsp_main_custom || ''} onChange={e => set('rtsp_main_custom', e.target.value)}
+                      placeholder="rtsp://... (main stream)" className={inputCls} />
+                    <input type="text" value={formData.rtsp_sub_custom || ''} onChange={e => set('rtsp_sub_custom', e.target.value)}
+                      placeholder="rtsp://... (sub stream)" className={inputCls} />
                   </div>
-                  Custom URL
-                </label>
-              </div>
-              {useCustomRTSP ? (
-                <div className="space-y-2">
-                  <input type="text" value={formData.rtsp_main_custom || ''} onChange={e => set('rtsp_main_custom', e.target.value)}
-                    placeholder="rtsp://... (main stream)" className={inputCls} />
-                  <input type="text" value={formData.rtsp_sub_custom || ''} onChange={e => set('rtsp_sub_custom', e.target.value)}
-                    placeholder="rtsp://... (sub stream)" className={inputCls} />
-                </div>
-              ) : (
-                <div className="space-y-1.5 mb-3">
-                  <div className="font-mono text-xs bg-white border border-slate-200 rounded-lg px-3 py-2 text-slate-600 break-all">
-                    <span className="text-slate-400 mr-1">Main:</span>{maskRTSPPassword(rtspMain)}
+                ) : (
+                  <div className="space-y-1.5 mb-3">
+                    <div className="font-mono text-xs bg-white border border-slate-200 rounded-lg px-3 py-2 text-slate-600 break-all">
+                      <span className="text-slate-400 mr-1">Main:</span>{maskRTSPPassword(rtspMain)}
+                    </div>
+                    <div className="font-mono text-xs bg-white border border-slate-200 rounded-lg px-3 py-2 text-slate-600 break-all">
+                      <span className="text-slate-400 mr-1">Sub:</span>{maskRTSPPassword(rtspSub)}
+                    </div>
                   </div>
-                  <div className="font-mono text-xs bg-white border border-slate-200 rounded-lg px-3 py-2 text-slate-600 break-all">
-                    <span className="text-slate-400 mr-1">Sub:</span>{maskRTSPPassword(rtspSub)}
+                )}
+                <RTSPTestButton rtspUrl={rtspMain || rtspSub} />
+              </div>
+            </div>
+
+            {/* Storage & rekaman */}
+            <div>
+              <div className={dividerCls}>
+                <span className="flex-1 h-px bg-slate-200" /><span>Penyimpanan &amp; Rekaman</span><span className="flex-1 h-px bg-slate-200" />
+              </div>
+              <div className="grid grid-cols-3 gap-4 mb-4">
+                <div>
+                  <label className={labelCls}>Storage Drive *</label>
+                  <select value={formData.storage_drive} onChange={e => set('storage_drive', e.target.value)}
+                    className={inputCls}>
+                    {storageDrives.length === 0 && <option value="">— Belum ada drive —</option>}
+                    {storageDrives.map(d => <option key={d} value={d}>{d}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className={labelCls}>Retensi (hari)</label>
+                  <input type="number" value={formData.retention_days} onChange={e => set('retention_days', parseInt(e.target.value))}
+                    min="1" max="365" className={inputCls} />
+                </div>
+                <div>
+                  <label className={labelCls}>Durasi Segmen</label>
+                  <select
+                    value={formData.segment_duration}
+                    onChange={e => set('segment_duration', parseInt(e.target.value))}
+                    className={inputCls}
+                  >
+                    <option value={900}>15 menit</option>
+                    <option value={1800}>30 menit</option>
+                    <option value={3600}>1 jam</option>
+                    <option value={7200}>2 jam</option>
+                  </select>
+                </div>
+              </div>
+              <label className="flex items-center gap-3 cursor-pointer group">
+                <div className={`w-10 h-5 rounded-full transition-colors relative flex-shrink-0 ${formData.motion_enabled ? 'bg-sky-500' : 'bg-slate-300'}`}
+                  onClick={() => set('motion_enabled', !formData.motion_enabled)}>
+                  <div className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${formData.motion_enabled ? 'translate-x-5' : 'translate-x-0.5'}`} />
+                </div>
+                <div>
+                  <div className="text-sm font-medium text-slate-700">Deteksi Gerakan</div>
+                  <div className="text-xs text-slate-400">Rekam otomatis saat ada gerakan terdeteksi</div>
+                </div>
+              </label>
+            </div>
+          </div>
+        )}
+
+        {/* ─── TAB: ONVIF Settings ────────────────────────────────── */}
+        {activeTab === 'onvif' && isEdit && (
+          <div className="p-6 space-y-5">
+            <div className="bg-sky-50 border border-sky-200 rounded-xl px-4 py-3 text-xs text-sky-700">
+              ℹ️ Setting ini dikirim langsung ke kamera via ONVIF. Pastikan kamera mendukung ONVIF Profile S.
+              Tidak semua kamera expose semua field — field yang tidak didukung akan diabaikan kamera.
+            </div>
+
+            {onvif.error && (
+              <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-sm text-red-600">
+                ❌ {onvif.error}
+              </div>
+            )}
+            {onvif.success && (
+              <div className="bg-green-50 border border-green-200 rounded-xl px-4 py-3 text-sm text-green-700">
+                ✅ {onvif.success}
+              </div>
+            )}
+
+            {onvif.loading ? (
+              <div className="text-center py-8 text-slate-400 text-sm">Membaca setting dari kamera...</div>
+            ) : (
+              <>
+                <div>
+                  <label className={labelCls}>Resolusi</label>
+                  <select
+                    className={inputCls}
+                    value={`${onvif.width}x${onvif.height}`}
+                    onChange={e => {
+                      const [w, h] = e.target.value.split('x').map(Number)
+                      setOnvif(s => ({ ...s, width: w, height: h }))
+                    }}
+                  >
+                    {RESOLUTIONS.map(r => (
+                      <option key={r.label} value={`${r.w}x${r.h}`}>{r.label}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className={labelCls}>Frame Rate (FPS): {onvif.fps} fps</label>
+                  <input
+                    type="range" min={1} max={30} step={1}
+                    value={onvif.fps}
+                    onChange={e => setOnvif(s => ({ ...s, fps: Number(e.target.value) }))}
+                    className="w-full accent-sky-500"
+                  />
+                  <div className="flex justify-between text-xs text-slate-400 mt-1">
+                    <span>1 fps</span><span>15 fps</span><span>30 fps</span>
                   </div>
                 </div>
-              )}
-              <RTSPTestButton rtspUrl={rtspMain || rtspSub} />
-            </div>
-          </div>
 
-          {/* Storage & rekaman */}
-          <div>
-            <div className={dividerCls}>
-              <span className="flex-1 h-px bg-slate-200" /><span>Penyimpanan &amp; Rekaman</span><span className="flex-1 h-px bg-slate-200" />
-            </div>
-            <div className="grid grid-cols-3 gap-4 mb-4">
-              <div>
-                <label className={labelCls}>Storage Drive *</label>
-                <select value={formData.storage_drive} onChange={e => set('storage_drive', e.target.value)}
-                  className={inputCls}>
-                  {storageDrives.length === 0 && <option value="">— Belum ada drive —</option>}
-                  {storageDrives.map(d => <option key={d} value={d}>{d}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className={labelCls}>Retensi (hari)</label>
-                <input type="number" value={formData.retention_days} onChange={e => set('retention_days', parseInt(e.target.value))}
-                  min="1" max="365" className={inputCls} />
-              </div>
-              <div>
-                <label className={labelCls}>Durasi Segmen</label>
-                <select
-                  value={formData.segment_duration}
-                  onChange={e => set('segment_duration', parseInt(e.target.value))}
-                  className={inputCls}
-                >
-                  <option value={900}>15 menit</option>
-                  <option value={1800}>30 menit</option>
-                  <option value={3600}>1 jam</option>
-                  <option value={7200}>2 jam</option>
-                </select>
-              </div>
-            </div>
-            <label className="flex items-center gap-3 cursor-pointer group">
-              <div className={`w-10 h-5 rounded-full transition-colors relative flex-shrink-0 ${formData.motion_enabled ? 'bg-sky-500' : 'bg-slate-300'}`}
-                onClick={() => set('motion_enabled', !formData.motion_enabled)}>
-                <div className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${formData.motion_enabled ? 'translate-x-5' : 'translate-x-0.5'}`} />
-              </div>
-              <div>
-                <div className="text-sm font-medium text-slate-700">Deteksi Gerakan</div>
-                <div className="text-xs text-slate-400">Rekam otomatis saat ada gerakan terdeteksi</div>
-              </div>
-            </label>
-          </div>
-        </div>
-      )}
-
-      {/* ─── TAB: ONVIF Settings ────────────────────────────────── */}
-      {activeTab === 'onvif' && isEdit && (
-        <div className="p-6 space-y-5">
-          <div className="bg-sky-50 border border-sky-200 rounded-xl px-4 py-3 text-xs text-sky-700">
-            ℹ️ Setting ini dikirim langsung ke kamera via ONVIF. Pastikan kamera mendukung ONVIF Profile S.
-            Tidak semua kamera expose semua field — field yang tidak didukung akan diabaikan kamera.
-          </div>
-
-          {onvif.error && (
-            <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-sm text-red-600">
-              ❌ {onvif.error}
-            </div>
-          )}
-          {onvif.success && (
-            <div className="bg-green-50 border border-green-200 rounded-xl px-4 py-3 text-sm text-green-700">
-              ✅ {onvif.success}
-            </div>
-          )}
-
-          {onvif.loading ? (
-            <div className="text-center py-8 text-slate-400 text-sm">Membaca setting dari kamera...</div>
-          ) : (
-            <>
-              {/* Resolusi */}
-              <div>
-                <label className={labelCls}>Resolusi</label>
-                <select
-                  className={inputCls}
-                  value={`${onvif.width}x${onvif.height}`}
-                  onChange={e => {
-                    const [w, h] = e.target.value.split('x').map(Number)
-                    setOnvif(s => ({ ...s, width: w, height: h }))
-                  }}
-                >
-                  {RESOLUTIONS.map(r => (
-                    <option key={r.label} value={`${r.w}x${r.h}`}>{r.label}</option>
-                  ))}
-                </select>
-              </div>
-
-              {/* FPS */}
-              <div>
-                <label className={labelCls}>Frame Rate (FPS): {onvif.fps} fps</label>
-                <input
-                  type="range" min={1} max={30} step={1}
-                  value={onvif.fps}
-                  onChange={e => setOnvif(s => ({ ...s, fps: Number(e.target.value) }))}
-                  className="w-full accent-sky-500"
-                />
-                <div className="flex justify-between text-xs text-slate-400 mt-1">
-                  <span>1 fps</span><span>15 fps</span><span>30 fps</span>
+                <div>
+                  <label className={labelCls}>Bitrate: {onvif.bitrate_kbps} Kbps ({(onvif.bitrate_kbps / 1024).toFixed(1)} Mbps)</label>
+                  <input
+                    type="range" min={256} max={16384} step={256}
+                    value={onvif.bitrate_kbps}
+                    onChange={e => setOnvif(s => ({ ...s, bitrate_kbps: Number(e.target.value) }))}
+                    className="w-full accent-sky-500"
+                  />
+                  <div className="flex justify-between text-xs text-slate-400 mt-1">
+                    <span>256 Kbps</span><span>4 Mbps</span><span>16 Mbps</span>
+                  </div>
                 </div>
-              </div>
 
-              {/* Bitrate */}
-              <div>
-                <label className={labelCls}>Bitrate: {onvif.bitrate_kbps} Kbps ({(onvif.bitrate_kbps / 1024).toFixed(1)} Mbps)</label>
-                <input
-                  type="range" min={256} max={16384} step={256}
-                  value={onvif.bitrate_kbps}
-                  onChange={e => setOnvif(s => ({ ...s, bitrate_kbps: Number(e.target.value) }))}
-                  className="w-full accent-sky-500"
-                />
-                <div className="flex justify-between text-xs text-slate-400 mt-1">
-                  <span>256 Kbps</span><span>4 Mbps</span><span>16 Mbps</span>
+                <div>
+                  <label className={labelCls}>Codec Video</label>
+                  <div className="flex gap-3">
+                    {['H264', 'H265'].map(c => (
+                      <label key={c} className="flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="radio" name="codec" value={c}
+                          checked={onvif.codec === c}
+                          onChange={() => setOnvif(s => ({ ...s, codec: c }))}
+                          className="accent-sky-500"
+                        />
+                        <span className="text-sm font-medium text-slate-700">{c}</span>
+                      </label>
+                    ))}
+                  </div>
                 </div>
-              </div>
 
-              {/* Codec */}
-              <div>
-                <label className={labelCls}>Codec Video</label>
+                <div className="bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-xs text-slate-500">
+                  <div className="font-semibold text-slate-600 mb-1">📊 Estimasi bandwidth & storage</div>
+                  <div>• Bitrate: <strong>{(onvif.bitrate_kbps / 1024).toFixed(2)} Mbps</strong> per kamera</div>
+                  <div>• Per jam: <strong>{((onvif.bitrate_kbps / 8) * 3600 / (1024 * 1024)).toFixed(1)} GB</strong></div>
+                  <div>• Per hari (24 jam): <strong>{((onvif.bitrate_kbps / 8) * 86400 / (1024 * 1024)).toFixed(1)} GB</strong></div>
+                  <div>• Per bulan: <strong>{((onvif.bitrate_kbps / 8) * 86400 * 30 / (1024 * 1024 * 1024)).toFixed(1)} GB</strong></div>
+                </div>
+
                 <div className="flex gap-3">
-                  {['H264', 'H265'].map(c => (
-                    <label key={c} className="flex items-center gap-2 cursor-pointer">
-                      <input
-                        type="radio" name="codec" value={c}
-                        checked={onvif.codec === c}
-                        onChange={() => setOnvif(s => ({ ...s, codec: c }))}
-                        className="accent-sky-500"
-                      />
-                      <span className="text-sm font-medium text-slate-700">{c}</span>
-                    </label>
-                  ))}
+                  <button
+                    onClick={loadOnvifSettings}
+                    disabled={onvif.loading}
+                    className="flex-1 px-4 py-2.5 rounded-xl text-sm font-medium text-slate-600 bg-white border border-slate-300 hover:bg-slate-100 transition-colors"
+                  >
+                    🔄 Baca Ulang dari Kamera
+                  </button>
+                  <button
+                    onClick={saveOnvifSettings}
+                    disabled={onvif.saving}
+                    className="flex-1 px-4 py-2.5 rounded-xl text-sm font-medium text-white bg-sky-600 hover:bg-sky-500 disabled:opacity-50 transition-colors"
+                  >
+                    {onvif.saving ? 'Mengirim...' : '📡 Terapkan ke Kamera'}
+                  </button>
                 </div>
-              </div>
+              </>
+            )}
+          </div>
+        )}
+      </div>
 
-              {/* Estimasi bandwidth */}
-              <div className="bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-xs text-slate-500">
-                <div className="font-semibold text-slate-600 mb-1">📊 Estimasi penggunaan bandwidth & storage</div>
-                <div>• Bitrate: <strong>{(onvif.bitrate_kbps / 1024).toFixed(2)} Mbps</strong> per kamera</div>
-                <div>• Per jam: <strong>{((onvif.bitrate_kbps / 8) * 3600 / (1024 * 1024)).toFixed(1)} GB</strong></div>
-                <div>• Per hari (24 jam): <strong>{((onvif.bitrate_kbps / 8) * 86400 / (1024 * 1024)).toFixed(1)} GB</strong></div>
-                <div>• Per bulan: <strong>{((onvif.bitrate_kbps / 8) * 86400 * 30 / (1024 * 1024 * 1024)).toFixed(1)} GB</strong></div>
-              </div>
-
-              <div className="flex gap-3">
-                <button
-                  onClick={loadOnvifSettings}
-                  disabled={onvif.loading}
-                  className="flex-1 px-4 py-2.5 rounded-xl text-sm font-medium text-slate-600 bg-white border border-slate-300 hover:bg-slate-100 transition-colors"
-                >
-                  🔄 Baca Ulang dari Kamera
-                </button>
-                <button
-                  onClick={saveOnvifSettings}
-                  disabled={onvif.saving}
-                  className="flex-1 px-4 py-2.5 rounded-xl text-sm font-medium text-white bg-sky-600 hover:bg-sky-500 disabled:opacity-50 transition-colors"
-                >
-                  {onvif.saving ? 'Mengirim...' : '📡 Terapkan ke Kamera'}
-                </button>
-              </div>
-            </>
-          )}
-        </div>
-      )}
-
-      {/* Footer — hanya tampilkan di tab basic */}
+      {/* Footer — sticky di bawah, selalu terlihat */}
       {activeTab === 'basic' && (
-        <div className="px-6 py-4 border-t border-slate-200 bg-slate-50 flex justify-end gap-3">
+        <div className="px-6 py-4 border-t border-slate-200 bg-slate-50 flex justify-end gap-3 flex-shrink-0">
           <button type="button" onClick={onCancel}
             className="px-5 py-2.5 rounded-xl text-sm font-medium text-slate-600 bg-white border border-slate-300 hover:bg-slate-100 transition-colors">
             Batal
