@@ -83,6 +83,8 @@ services:
     volumes:
       - hls_data:/var/lib/nvr_cam/hls:ro
       - snapshot_data:/var/lib/nvr_cam/snapshots:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       - api
     restart: unless-stopped
