@@ -4,6 +4,7 @@ Discovery API Router
 Provides endpoints for discovering cameras on the network.
 Metode 1: ONVIF WS-Discovery
 Metode 2: RTSP port scan (554) — fallback jika ONVIF gagal
+Metode 3: IP Range Scan — scan seluruh subnet via port ONVIF + Dahua
 """
 
 import asyncio
@@ -71,10 +72,11 @@ async def _check_port_open(ip: str, port: int = 554, timeout: float = 1.5) -> bo
         return False
 
 
-async def _scan_rtsp_subnet(network: str, timeout: float = 1.5, max_concurrent: int = 50) -> List[dict]:
+async def _scan_rtsp_subnet(network: str, timeout: float = 1.5, max_concurrent: int = 100) -> List[dict]:
     """
     Scan seluruh subnet untuk host dengan port RTSP 554 terbuka.
     Lebih cepat dari ONVIF karena hanya cek TCP port, tidak butuh ONVIF support.
+    max_concurrent dinaikkan ke 100 agar scan /24 selesai lebih cepat.
     """
     try:
         net = ipaddress.ip_network(network, strict=False)
@@ -113,16 +115,28 @@ def _is_likely_camera(cam: dict) -> bool:
 
 def _get_local_network() -> Optional[str]:
     """Coba deteksi subnet lokal secara otomatis."""
+    # Coba via host.docker.internal dulu (paling akurat di Docker)
+    try:
+        host_ip = socket.gethostbyname("host.docker.internal")
+        if not host_ip.startswith('127.') and not host_ip.startswith('172.'):
+            parts = host_ip.split(".")
+            subnet = f"{parts[0]}.{parts[1]}.{parts[2]}.0/24"
+            logger.info(f"Subnet dari host.docker.internal: {subnet}")
+            return subnet
+    except Exception:
+        pass
+    # Fallback: routing trick
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.connect(("8.8.8.8", 80))
         local_ip = s.getsockname()[0]
         s.close()
-        # Asumsikan /24
-        parts = local_ip.split(".")
-        return f"{parts[0]}.{parts[1]}.{parts[2]}.0/24"
+        if not local_ip.startswith('172.') and not local_ip.startswith('127.'):
+            parts = local_ip.split(".")
+            return f"{parts[0]}.{parts[1]}.{parts[2]}.0/24"
     except Exception:
-        return None
+        pass
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -177,8 +191,9 @@ async def discover_onvif_cameras(
     Temukan kamera IP di jaringan.
 
     method='onvif'     → WS-Discovery ONVIF (butuh kamera support ONVIF)
-    method='rtsp_scan' → Scan port 554 di seluruh subnet (lebih kompatibel,
-                         menemukan kamera non-ONVIF sekalipun)
+    method='rtsp_scan' → Scan port ONVIF (80/8080) + Dahua (37777/37778)
+                         di seluruh subnet. Lebih compatible, menemukan
+                         kamera non-ONVIF dan NVR Dahua sekalipun.
     """
     global _discovery_status
 
@@ -191,25 +206,41 @@ async def discover_onvif_cameras(
     try:
         method = request.method.lower()
 
-        # ── Metode RTSP Port Scan ──────────────────────────────────────────
+        # ── Metode IP Range Scan (ONVIF + Dahua ports) ────────────────────────
         if method == "rtsp_scan":
             network = request.network or _get_local_network()
             if not network:
-                raise HTTPException(status_code=400, detail="Tidak bisa deteksi subnet lokal. Isi field 'network' secara manual (contoh: 192.168.1.0/24)")
+                raise HTTPException(
+                    status_code=400,
+                    detail="Tidak bisa deteksi subnet lokal. Isi field 'Network CIDR' secara manual (contoh: 10.1.0.0/24)"
+                )
 
-            raw = await _scan_rtsp_subnet(network, timeout=request.timeout)
-            total_found = len(raw)
+            # Gunakan onvif_scanner yang sudah support Dahua port 37777/37778
+            raw_cameras = await discover_cameras(
+                network=network,
+                timeout=request.timeout,
+            )
+
+            total_found = len(raw_cameras)
             _discovery_status["cameras_found"] = total_found
 
-            cameras = [
-                DiscoveredCamera(
-                    ip=c["ip"],
-                    port=c["port"],
-                    method="rtsp_scan",
-                    is_camera=True,
-                )
-                for c in raw
-            ]
+            cameras = []
+            for cam in raw_cameras:
+                try:
+                    cameras.append(DiscoveredCamera(
+                        ip=cam["ip"],
+                        port=cam["port"],
+                        manufacturer=cam.get("manufacturer"),
+                        model=cam.get("model"),
+                        name=cam.get("name"),
+                        rtsp_url=cam.get("rtsp_url") or cam.get("suggested_rtsp_main"),
+                        onvif_url=cam.get("onvif_url"),
+                        mac_address=cam.get("mac_address"),
+                        is_camera=True,
+                        method="rtsp_scan",
+                    ))
+                except Exception:
+                    pass
 
             return DiscoveryResponse(
                 cameras=cameras,
@@ -220,7 +251,7 @@ async def discover_onvif_cameras(
                 method_used="rtsp_scan",
             )
 
-        # ── Metode ONVIF WS-Discovery ──────────────────────────────────────
+        # ── Metode ONVIF WS-Discovery ────────────────────────────────────
         raw_cameras = await discover_cameras(
             network=request.network,
             timeout=request.timeout

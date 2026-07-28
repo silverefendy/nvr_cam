@@ -1,4 +1,5 @@
 import { apiClient } from './client'
+import axios from 'axios'
 
 export interface DiscoveryRequest {
   network?: string
@@ -37,9 +38,22 @@ export interface DiscoveryStatus {
   cameras_found: number
 }
 
+// Client khusus untuk discovery dengan timeout panjang (120 detik)
+// Scan /24 subnet bisa memakan waktu 30-60 detik
+const discoveryClient = axios.create({
+  baseURL: '/api/v1',
+  timeout: 120_000,
+})
+
+discoveryClient.interceptors.request.use((config) => {
+  const token = localStorage.getItem('access_token')
+  if (token) config.headers.Authorization = `Bearer ${token}`
+  return config
+})
+
 export const discoveryApi = {
   scan: (req: DiscoveryRequest = {}) =>
-    apiClient.post<DiscoveryResponse>('/discovery/cameras', req).then(r => r.data),
+    discoveryClient.post<DiscoveryResponse>('/discovery/cameras', req).then(r => r.data),
 
   status: () =>
     apiClient.get<DiscoveryStatus>('/discovery/status').then(r => r.data),
