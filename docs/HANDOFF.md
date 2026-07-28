@@ -1,8 +1,8 @@
 # HANDOFF — nvr_cam
 ## Status Proyek + Issue Tracker (Dokumen Tunggal untuk Claude Baru)
 
-**Terakhir diperbarui:** 28 Juli 2026 (Sesi #021)
-**Sesi Terakhir:** #021 (Fix build errors — Alembic revision chain, migration 003, docker-compose)
+**Terakhir diperbarui:** 28 Juli 2026 (Sesi #022)
+**Sesi Terakhir:** #022 (Audit discovery scanner + storage browse — temuan, belum di-fix)
 **Repo:** https://github.com/silverefendy/nvr_cam
 
 ---
@@ -13,8 +13,8 @@
 Repo nvr_cam: https://github.com/silverefendy/nvr_cam
 Akses via MCP GitHub. Baca file ini sebelum mulai: docs/HANDOFF.md
 
-Progress per 28 Juli 2026 (Sesi #021 selesai):
-- Backend:     ✅ SELESAI (11 router, semua services, Python import passing)
+Progress per 28 Juli 2026 (Sesi #022 selesai — audit saja, fix belum di-push):
+- Backend:     🟡 Perlu build ulang + verifikasi (setelah fix sesi #021)
 - Frontend:    ✅ SELESAI (npm run build SUCCESS, Tailwind fix sudah include)
 - Flutter:     🟡 Code ada, flutter analyze belum diverifikasi
 - Deploy:      ✅ scripts/install.sh siap untuk native Ubuntu
@@ -22,7 +22,8 @@ Progress per 28 Juli 2026 (Sesi #021 selesai):
 - Live View:   ✅ Grid selector, fullscreen, PiP, toggle stream, drag-drop, filter, floating mode, sort filter
 - Playback:    ✅ Auth token fix, HEVC transcode, file >100MB bisa diputar, file 0MB tidak muncul
 - Cameras:     ✅ Sort per kolom, filter search + dropdown status
-- Discovery:   🟡 Belum bisa ditest — perlu build ulang setelah fix
+- Discovery:   🔴 BUG-058 + BUG-059 — scanner UDP multicast blocking, onvif-zeep tidak terpakai
+- Storage:     🔴 BUG-060 — path salah (/mnt/driveE vs /mnt/driveA), belum ada endpoint browse
 
 Stack: FastAPI (Python 3.12) + PostgreSQL 16 + React/Vite (TypeScript) + Flutter
 Server: Ubuntu Server 24.04, Intel i5, 8x WD Purple 4TB ZFS
@@ -48,10 +49,32 @@ Dokumen penting:
 | Mobile Flutter | 🟡 **Code Ada** | `flutter analyze` belum diverifikasi |
 | Deploy Scripts | ✅ **SIAP** | `scripts/install.sh` untuk native Ubuntu |
 | Docker Dev Mode | 🟡 **Perlu Build Ulang** | Jalankan `docker compose up --build -d` setelah pull latest |
+| Discovery | 🔴 **Ada Bug** | BUG-058 + BUG-059 — perlu fix di `onvif_scanner.py` |
+| Storage | 🔴 **Ada Bug** | BUG-060 — path salah + belum ada endpoint browse filesystem |
 
 ---
 
 ## Yang Selesai per Sesi
+
+### Sesi #022 — 28 Juli 2026 (Audit)
+
+Sesi ini adalah audit — tidak ada file yang di-push ke backend/frontend. Yang ditemukan:
+
+| ID | Temuan | Status |
+|----|--------|--------|
+| BUG-058 | `onvif_scanner.py` — `_ws_discovery()` synchronous blocking (`sock.recvfrom`) di dalam coroutine async. UDP multicast sering diblokir di Docker, menyebabkan hang/timeout buruk. Tidak ada fallback ke port scan 80/8000 per host. | 🔴 Belum Fix |
+| BUG-059 | `requirements.txt` memuat `onvif-zeep==0.2.12` tapi `onvif_scanner.py` tidak memakai library ini sama sekali (pakai raw socket + aiohttp). Menambah beban image dan potensi conflict dengan `zeep==4.2.1`. | 🔴 Belum Fix |
+| BUG-060 | `storage.yaml` punya path `/mnt/driveE` yang tidak ada di Docker (volume mount di `docker-compose.yml` adalah `/mnt/driveA`). Halaman storage selalu kosong. Tidak ada endpoint `GET /drives/browse` untuk melihat path valid di server. | 🔴 Belum Fix |
+| INFO | `docker-compose.dev.yml` tidak expose `/mnt` ke container sama sekali — storage tidak akan bisa diakses di dev mode kecuali bind mount diset manual. | ⚠️ Perlu didokumentasikan |
+
+**Fix yang perlu dikerjakan di sesi berikutnya:**
+1. `onvif_scanner.py` — rewrite `_ws_discovery()` ke async non-blocking + tambah fallback port scan 80/8000 per host range
+2. `requirements.txt` — hapus `onvif-zeep==0.2.12`
+3. `storage.yaml` — perbaiki path ke `/mnt/driveA` (sesuaikan dengan `docker-compose.yml`)
+4. Backend — tambah endpoint `GET /api/v1/drives/browse?path=/mnt` untuk browse filesystem dari UI
+5. Frontend — tambah file browser modal di halaman Storage untuk pilih mount point
+
+---
 
 ### Sesi #021 — 28 Juli 2026
 
@@ -70,7 +93,7 @@ Dokumen penting:
 |----|------|--------|
 | BUG-055 | API crash loop — Alembic migration 003 setengah jalan (DROP TABLE gagal tanpa CASCADE) | ✅ Fixed di sesi #021 |
 | DEBUG | Discovery endpoint `POST /api/v1/discovery/cameras` return 404 — container masih image lama | 🟡 Tertunda — perlu build ulang dulu |
-| DEBUG | `onvif-zeep` tidak terinstall di container — tapi tidak relevan karena `onvif_scanner.py` tidak pakai library ini (pakai `aiohttp` + WS-Discovery UDP manual) | ✅ Temuan — bukan bug |
+| DEBUG | `onvif-zeep` tidak terinstall di container — tapi tidak relevan karena `onvif_scanner.py` tidak pakai library ini (pakai `aiohttp` + WS-Discovery UDP manual) | ✅ Temuan — root cause ada di BUG-058/059 |
 
 ### Sesi #019 — 27 Juli 2026 (Siang)
 
@@ -227,20 +250,18 @@ systemctl status nvr-api nvr-recorder nvr-motion nvr-encoder
 
 ## Issue Tracker & Backlog
 
-### ✅ Semua Bug Kritis Sudah Fixed
+### 🔴 Bug Aktif (Perlu Fix)
 
-Tidak ada bug kritis yang memblokir. Langkah selanjutnya: pull + build ulang dan verifikasi.
-
-```bash
-git pull
-docker compose up --build -d
-docker compose logs api -f
-```
+| ID | Bug | File | Prioritas |
+|----|-----|------|----------|
+| BUG-058 | `onvif_scanner.py` — `_ws_discovery()` sync blocking di coroutine async, tidak ada fallback port scan | `backend/app/services/onvif_scanner.py` | **Tinggi** |
+| BUG-059 | `requirements.txt` memuat `onvif-zeep==0.2.12` tapi tidak pernah dipakai di kode manapun | `backend/requirements.txt` | **Sedang** |
+| BUG-060 | `storage.yaml` path `/mnt/driveE` tidak cocok dengan Docker volume `/mnt/driveA`. Halaman storage kosong. Tidak ada endpoint browse filesystem. | `storage.yaml`, `backend/app/api/v1/endpoints/storage.py` | **Tinggi** |
 
 ### ❓ Yang Masih Perlu Diverifikasi (setelah build ulang)
 
 | # | Item | Cara Verifikasi |
-|---|------|-----------------|
+|---|------|----------------|
 | 1 | API container tidak crash loop | `docker compose logs api --tail 30` — harus ada `Application startup complete` |
 | 2 | Discovery scan ONVIF | Swagger `http://localhost:8000/api/docs` → POST `/api/v1/discovery/cameras` |
 | 3 | cam_03 — 403 Forbidden | Edit cam_03 di halaman Cameras → update credentials RTSP |
@@ -255,11 +276,12 @@ docker compose logs api -f
 ### 🔴 Prioritas Tinggi — Fitur Belum Dikerjakan
 
 | ID | Task | Catatan |
-|----|------|---------|
+|----|------|--------|
 | F-08 | Statistik storage per kamera | Berapa GB per kamera per hari |
 | F-09 | Jadwal cleanup terjadwal | Cleanup rutin, bukan hanya saat disk penuh |
 | F-10 | Alert disk kritis via Telegram | Penting untuk 30 kamera |
 | D-09 | Download rekaman ke lokal | Tombol download di halaman Playback |
+| G-07 | Auto-add dari discovery | Setelah BUG-058 fix |
 
 ### 🟠 Prioritas Sedang — Fitur Belum Dikerjakan
 
@@ -302,7 +324,6 @@ docker compose logs api -f
 | L-08–L-09 | Health check publik, UFW firewall | ⏳ |
 | K-06–K-10 | Flutter analyze, build APK, FCM, biometric, landscape | ⏭️ nanti |
 | J-04–J-05 | AV1 progress encode, GPU acceleration | ⏳ |
-| G-07 | Auto-add dari discovery | ⏳ |
 
 ### UI Redesign Sisa (Tema Terang)
 
@@ -331,7 +352,7 @@ docker compose logs api -f
 ## Timeline Sesi Development
 
 | No | Tanggal | Sesi | Agent | Yang Dikerjakan |
-|----|---------|------|-------|-----------------|
+|----|---------|------|-------|----------------|
 | 1–2 | — | #001–002 | Claude | Kerangka awal, backend, frontend, Flutter |
 | 3 | 2 Juli 2026 | #003 | Claude | Audit + update dokumentasi |
 | 4 | 3 Juli 2026 | #004 | Devin AI | Fix BUG-001–012 |
@@ -351,6 +372,7 @@ docker compose logs api -f
 | 18 | 27 Juli 2026 | #019 | Claude | Discovery UI fix (tombol muncul, TypeScript error) |
 | 19 | 27 Juli 2026 | #020 | Claude | Debug discovery scan + temukan BUG-055 (migration 003 crash loop) |
 | 20 | 28 Juli 2026 | #021 | Claude | Fix BUG-055/056/057, docker-compose path, hapus file sampah |
+| 21 | 28 Juli 2026 | #022 | Claude | Audit discovery + storage — temuan BUG-058/059/060, belum di-fix |
 
 ---
 
