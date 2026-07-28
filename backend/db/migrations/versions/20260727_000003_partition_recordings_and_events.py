@@ -23,14 +23,18 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def is_partitioned(table_name: str) -> bool:
-    """Check if table is already partitioned using current sync connection."""
+    """Check if table is already partitioned using current sync connection.
+
+    Menggunakan subquery to_regclass() untuk avoid asyncpg incompatibility
+    antara named bind parameter (:tbl) dan PostgreSQL cast operator (::regclass).
+    """
     bind = op.get_bind()
     insp = inspect(bind)
     if not insp.has_table(table_name):
         return False
     res = bind.execute(text(
         "SELECT 1 FROM pg_partitioned_table "
-        "WHERE partrelid = :tbl::regclass"
+        "WHERE partrelid = to_regclass(:tbl)"
     ), {"tbl": table_name}).fetchone()
     return res is not None
 
