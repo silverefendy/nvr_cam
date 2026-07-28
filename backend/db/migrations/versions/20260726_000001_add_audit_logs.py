@@ -1,6 +1,6 @@
 """Add audit logs table
 
-Revision ID: 20260726_000001
+Revision ID: 001b
 Revises: 001
 Create Date: 2026-07-26 00:00:01
 """
@@ -8,7 +8,7 @@ from typing import Sequence, Union
 
 from alembic import op
 
-revision: str = "20260726_000001"
+revision: str = "001b"
 down_revision: Union[str, None] = "001"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None

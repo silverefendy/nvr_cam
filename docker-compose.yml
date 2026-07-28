@@ -1,4 +1,4 @@
-﻿services:
+services:
   db:
     image: postgres:16-alpine
     container_name: cctv_db
@@ -26,7 +26,10 @@
     volumes:
       - ./config:/app/config
       - ./scripts:/app/scripts:ro
-      - D:/nvr_recordings:/mnt/driveA
+      # Mount folder rekaman dari host — sesuaikan path dengan server production
+      # Contoh Linux: /mnt/nvr_recordings:/mnt/driveA
+      # Contoh Windows dev: menggunakan volume Docker di bawah
+      - nvr_recordings:/mnt/driveA
       - hls_data:/var/lib/nvr_cam/hls
       - snapshot_data:/var/lib/nvr_cam/snapshots
     ports:
@@ -56,4 +59,7 @@ volumes:
   postgres_data:
   hls_data:
   snapshot_data:
-
+  # Volume dev untuk rekaman (production: ganti dengan bind mount ke folder HDD)
+  # Untuk production: edit volumes di atas dan tambahkan:
+  #   - /mnt/nvr_recordings:/mnt/driveA
+  nvr_recordings:

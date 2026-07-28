@@ -1,7 +1,7 @@
 """Add camera groups, schedule, and dual stream properties
 
 Revision ID: 002
-Revises: 20260726_000001
+Revises: 001b
 Create Date: 2026-07-26 23:50:00.000000
 
 """
@@ -9,35 +9,39 @@ from typing import Sequence, Union
 
 from alembic import op
 import sqlalchemy as sa
-from sqlalchemy.dialects import postgresql
 from sqlalchemy import inspect
 
 # revision identifiers, used by Alembic.
 revision: str = '002'
-down_revision: Union[str, None] = '20260726_000001'
+down_revision: Union[str, None] = '001b'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
-def table_exists(name) -> bool:
-    from alembic import context
-    if context.is_offline_mode():
-        return False
+def _get_inspector():
+    """Helper: return an Inspector bound to the current migration connection."""
+    from alembic import context as alembic_ctx
+    if alembic_ctx.is_offline_mode():
+        return None
     bind = op.get_bind()
+    return inspect(bind)
+
+
+def table_exists(name) -> bool:
+    insp = _get_inspector()
+    if insp is None:
+        return False
     try:
-        insp = inspect(bind)
         return insp.has_table(name)
     except Exception:
         return False
 
 
 def column_exists(table, column) -> bool:
-    from alembic import context
-    if context.is_offline_mode():
+    insp = _get_inspector()
+    if insp is None:
         return False
-    bind = op.get_bind()
     try:
-        insp = inspect(bind)
         columns = [c['name'] for c in insp.get_columns(table)]
         return column in columns
     except Exception:
@@ -80,7 +84,6 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    # Downgrade drops columns and tables if they exist
     if column_exists("cameras", "group_id"):
         op.drop_column("cameras", "group_id")
     if column_exists("cameras", "schedule_days"):
