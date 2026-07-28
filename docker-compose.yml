@@ -5,6 +5,8 @@ services:
     env_file:
       - path: .env
         required: false
+      - path: .env.example
+        required: false
     environment:
       POSTGRES_USER: ${DB_USER:-nvr_user}
       POSTGRES_PASSWORD: ${DB_PASSWORD:-NvrCam2026!}
@@ -27,6 +29,8 @@ services:
     container_name: cctv_api
     env_file:
       - path: .env
+        required: false
+      - path: .env.example
         required: false
     environment:
       DB_HOST: ${DB_HOST:-db}
