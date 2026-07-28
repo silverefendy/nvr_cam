@@ -26,6 +26,9 @@ numpy==1.26.4
 # HTTP client (dipakai oleh onvif_scanner dan notifier)
 aiohttp==3.10.0
 
+# ONVIF (camera settings: FPS, bitrate, resolution, codec via SOAP)
+onvif-zeep==0.2.12
+
 # Notifications & utilities
 psutil==6.0.0
 schedule==1.2.2
