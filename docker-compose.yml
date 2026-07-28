@@ -2,10 +2,13 @@ services:
   db:
     image: postgres:16-alpine
     container_name: cctv_db
+    env_file:
+      - path: .env
+        required: false
     environment:
-      POSTGRES_USER: ${DB_USER:?DB_USER must be set}
-      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD must be set}
-      POSTGRES_DB: ${DB_NAME:?DB_NAME must be set}
+      POSTGRES_USER: ${DB_USER:-nvr_user}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-NvrCam2026!}
+      POSTGRES_DB: ${DB_NAME:-nvr_cam}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:
@@ -22,7 +25,27 @@ services:
       context: .
       dockerfile: Dockerfile.backend
     container_name: cctv_api
-    env_file: .env
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DB_HOST: ${DB_HOST:-db}
+      DB_PORT: ${DB_PORT:-5432}
+      DB_NAME: ${DB_NAME:-nvr_cam}
+      DB_USER: ${DB_USER:-nvr_user}
+      DB_PASSWORD: ${DB_PASSWORD:-NvrCam2026!}
+      JWT_SECRET: ${JWT_SECRET:-changeme_minimal_32_chars_secret_key}
+      JWT_ACCESS_EXPIRE_MINUTES: ${JWT_ACCESS_EXPIRE_MINUTES:-60}
+      JWT_REFRESH_EXPIRE_DAYS: ${JWT_REFRESH_EXPIRE_DAYS:-7}
+      APP_ENV: ${APP_ENV:-production}
+      APP_HOST: ${APP_HOST:-0.0.0.0}
+      APP_PORT: ${APP_PORT:-8000}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      CORS_ALLOW_ORIGINS: ${CORS_ALLOW_ORIGINS:-http://localhost:3000,http://localhost:5173}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-Admin123!}
+      STORAGE_THRESHOLD_PCT: ${STORAGE_THRESHOLD_PCT:-10.0}
+      HLS_TEMP_DIR: ${HLS_TEMP_DIR:-/tmp/hls}
+      CONFIG_DIR: ${CONFIG_DIR:-config}
     volumes:
       - ./config:/app/config
       - ./scripts:/app/scripts:ro
