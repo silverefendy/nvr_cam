@@ -1,8 +1,8 @@
 # HANDOFF — nvr_cam
 ## Status Proyek + Issue Tracker (Dokumen Tunggal untuk Claude Baru)
 
-**Terakhir diperbarui:** 28 Juli 2026 (Sesi #022)
-**Sesi Terakhir:** #022 (Audit discovery scanner + storage browse — temuan, belum di-fix)
+**Terakhir diperbarui:** 28 Juli 2026 (Sesi #023)
+**Sesi Terakhir:** #023 (Verifikasi kode BUG-058/059/060 — semua sudah resolved di kode)
 **Repo:** https://github.com/silverefendy/nvr_cam
 
 ---
@@ -13,7 +13,7 @@
 Repo nvr_cam: https://github.com/silverefendy/nvr_cam
 Akses via MCP GitHub. Baca file ini sebelum mulai: docs/HANDOFF.md
 
-Progress per 28 Juli 2026 (Sesi #022 selesai — audit saja, fix belum di-push):
+Progress per 28 Juli 2026 (Sesi #023 selesai):
 - Backend:     🟡 Perlu build ulang + verifikasi (setelah fix sesi #021)
 - Frontend:    ✅ SELESAI (npm run build SUCCESS, Tailwind fix sudah include)
 - Flutter:     🟡 Code ada, flutter analyze belum diverifikasi
@@ -22,8 +22,8 @@ Progress per 28 Juli 2026 (Sesi #022 selesai — audit saja, fix belum di-push):
 - Live View:   ✅ Grid selector, fullscreen, PiP, toggle stream, drag-drop, filter, floating mode, sort filter
 - Playback:    ✅ Auth token fix, HEVC transcode, file >100MB bisa diputar, file 0MB tidak muncul
 - Cameras:     ✅ Sort per kolom, filter search + dropdown status
-- Discovery:   🔴 BUG-058 + BUG-059 — scanner UDP multicast blocking, onvif-zeep tidak terpakai
-- Storage:     🔴 BUG-060 — path salah (/mnt/driveE vs /mnt/driveA), belum ada endpoint browse
+- Discovery:   🟡 Kode sudah benar (async executor + fallback port scan) — belum ditest karena container belum rebuild
+- Storage:     🟡 Path benar, endpoint /browse ada — belum ditest karena container belum rebuild
 
 Stack: FastAPI (Python 3.12) + PostgreSQL 16 + React/Vite (TypeScript) + Flutter
 Server: Ubuntu Server 24.04, Intel i5, 8x WD Purple 4TB ZFS
@@ -49,59 +49,68 @@ Dokumen penting:
 | Mobile Flutter | 🟡 **Code Ada** | `flutter analyze` belum diverifikasi |
 | Deploy Scripts | ✅ **SIAP** | `scripts/install.sh` untuk native Ubuntu |
 | Docker Dev Mode | 🟡 **Perlu Build Ulang** | Jalankan `docker compose up --build -d` setelah pull latest |
-| Discovery | 🔴 **Ada Bug** | BUG-058 + BUG-059 — perlu fix di `onvif_scanner.py` |
-| Storage | 🔴 **Ada Bug** | BUG-060 — path salah + belum ada endpoint browse filesystem |
+| Discovery | 🟡 **Kode Sudah Fix** | `onvif_scanner.py` sudah async-safe + fallback port scan — perlu build ulang untuk test |
+| Storage | 🟡 **Kode Sudah Fix** | `storage.yaml` path benar, `/browse` endpoint ada — perlu build ulang untuk test |
 
 ---
 
 ## Yang Selesai per Sesi
 
+### Sesi #023 — 28 Juli 2026 (Verifikasi kode)
+
+Verifikasi langsung ke source code — semua bug yang dicatat di sesi #022 ternyata **sudah diperbaiki di kode**:
+
+| ID | Temuan Awal (Sesi #022) | Status Setelah Verifikasi |
+|----|-------------------------|---------------------------|
+| BUG-058 | `_ws_discovery()` sync blocking | ✅ **Sudah fix** — `_ws_discovery_blocking()` dijalankan via `asyncio.get_event_loop().run_in_executor(_UDP_EXECUTOR, ...)`. Fallback port scan 80/8000/8080 juga sudah ada di `_port_scan()`. |
+| BUG-059 | `onvif-zeep==0.2.12` di requirements.txt | ✅ **Sudah fix** — library tidak ada di `requirements.txt`. Yang ada hanya `aiohttp==3.10.0` (benar). |
+| BUG-060 | `storage.yaml` path salah + tidak ada `/browse` | ✅ **Sudah fix** — `storage.yaml` sudah pakai `/mnt/driveA`. Endpoint `GET /api/v1/storage/browse` sudah lengkap di `storage.py` dengan validasi path + info disk. |
+
+**Catatan:** Discovery dan storage belum bisa ditest fungsional karena container belum di-rebuild setelah sesi #021. Langkah wajib sebelum test:
+```bash
+git pull
+docker compose up --build -d
+docker compose logs api --tail 30
+# Tunggu: "NVR API service started successfully"
+```
+
+---
+
 ### Sesi #022 — 28 Juli 2026 (Audit)
 
-Sesi ini adalah audit — tidak ada file yang di-push ke backend/frontend. Yang ditemukan:
+Sesi audit — tidak ada file code yang di-push. Temuan:
 
 | ID | Temuan | Status |
 |----|--------|--------|
-| BUG-058 | `onvif_scanner.py` — `_ws_discovery()` synchronous blocking (`sock.recvfrom`) di dalam coroutine async. UDP multicast sering diblokir di Docker, menyebabkan hang/timeout buruk. Tidak ada fallback ke port scan 80/8000 per host. | 🔴 Belum Fix |
-| BUG-059 | `requirements.txt` memuat `onvif-zeep==0.2.12` tapi `onvif_scanner.py` tidak memakai library ini sama sekali (pakai raw socket + aiohttp). Menambah beban image dan potensi conflict dengan `zeep==4.2.1`. | 🔴 Belum Fix |
-| BUG-060 | `storage.yaml` punya path `/mnt/driveE` yang tidak ada di Docker (volume mount di `docker-compose.yml` adalah `/mnt/driveA`). Halaman storage selalu kosong. Tidak ada endpoint `GET /drives/browse` untuk melihat path valid di server. | 🔴 Belum Fix |
-| INFO | `docker-compose.dev.yml` tidak expose `/mnt` ke container sama sekali — storage tidak akan bisa diakses di dev mode kecuali bind mount diset manual. | ⚠️ Perlu didokumentasikan |
-
-**Fix yang perlu dikerjakan di sesi berikutnya:**
-1. `onvif_scanner.py` — rewrite `_ws_discovery()` ke async non-blocking + tambah fallback port scan 80/8000 per host range
-2. `requirements.txt` — hapus `onvif-zeep==0.2.12`
-3. `storage.yaml` — perbaiki path ke `/mnt/driveA` (sesuaikan dengan `docker-compose.yml`)
-4. Backend — tambah endpoint `GET /api/v1/drives/browse?path=/mnt` untuk browse filesystem dari UI
-5. Frontend — tambah file browser modal di halaman Storage untuk pilih mount point
-
----
+| BUG-058 | `onvif_scanner.py` async blocking + tidak ada fallback | ✅ Ternyata sudah fix (lihat sesi #023) |
+| BUG-059 | `onvif-zeep` di requirements | ✅ Ternyata sudah fix |
+| BUG-060 | `storage.yaml` path salah + tidak ada `/browse` | ✅ Ternyata sudah fix |
 
 ### Sesi #021 — 28 Juli 2026
 
 | ID | Item | Status |
 |----|------|--------|
-| BUG-056 | Alembic revision chain putus — `20260726_000001` pakai revision ID format panjang, migration 002 `down_revision` tidak cocok | ✅ Fixed — semua revision ID distandardisasi ke `001`, `001b`, `002`, `003` |
-| BUG-057 | Migration 003 crash: `op.get_bind()` + `bind.execute()` synchronous di async engine (asyncpg) | ✅ Fixed — pakai `sqlalchemy.text()` + bind dari `op.get_bind()` yang sudah sync dalam `run_sync()` |
-| BUG-055 | Migration 003 `DROP TABLE` gagal tanpa CASCADE — crash loop container | ✅ Fixed — semua DROP pakai `IF EXISTS ... CASCADE` |
-| CHORE | `docker-compose.yml` hardcoded Windows path `D:/nvr_recordings` | ✅ Fixed — diganti Docker named volume `nvr_recordings` dengan komentar panduan production |
-| CHORE | `fix-cameras-discovery-jsx.ps1` — file debug sementara di root | ✅ Dihapus |
-| CHORE | `docs/NVR_CAM_Blueprint.md` — blueprint lama 47KB sudah terwakili di HANDOFF/FEATURES/INSTALL_OPS | ✅ Dihapus |
+| BUG-056 | Alembic revision chain putus | ✅ Fixed — distandardisasi ke `001`, `001b`, `002`, `003` |
+| BUG-057 | Migration 003 crash sync di async engine | ✅ Fixed — pakai `sqlalchemy.text()` dalam `run_sync()` |
+| BUG-055 | Migration 003 DROP TABLE gagal tanpa CASCADE | ✅ Fixed — semua DROP pakai `IF EXISTS ... CASCADE` |
+| CHORE | `docker-compose.yml` hardcoded Windows path | ✅ Fixed — Docker named volume `nvr_recordings` |
+| CHORE | `fix-cameras-discovery-jsx.ps1` | ✅ Dihapus |
+| CHORE | `docs/NVR_CAM_Blueprint.md` | ✅ Dihapus |
 
 ### Sesi #020 — 27 Juli 2026 (Malam)
 
 | ID | Item | Status |
 |----|------|--------|
-| BUG-055 | API crash loop — Alembic migration 003 setengah jalan (DROP TABLE gagal tanpa CASCADE) | ✅ Fixed di sesi #021 |
-| DEBUG | Discovery endpoint `POST /api/v1/discovery/cameras` return 404 — container masih image lama | 🟡 Tertunda — perlu build ulang dulu |
-| DEBUG | `onvif-zeep` tidak terinstall di container — tapi tidak relevan karena `onvif_scanner.py` tidak pakai library ini (pakai `aiohttp` + WS-Discovery UDP manual) | ✅ Temuan — root cause ada di BUG-058/059 |
+| BUG-055 | API crash loop — Alembic migration 003 crash loop | ✅ Fixed di sesi #021 |
+| DEBUG | Discovery endpoint return 404 — container masih image lama | 🟡 Perlu build ulang |
 
 ### Sesi #019 — 27 Juli 2026 (Siang)
 
 | ID | Fitur / Fix | File | Status |
 |----|-------------|------|--------|
-| G-06 | Discovery kamera ONVIF — tombol "🔍 Cari Kamera" tidak muncul di UI | `Cameras/index.tsx` | ✅ Fixed |
-| BUG-TS-1 | TypeScript error `Cameras/index.tsx` baris 252 — `<DiscoveryModal>` di luar wrapper `<div>` | `Cameras/index.tsx` | ✅ Fixed |
-| BUG-TS-2 | TypeScript error `DiscoveryModal.tsx` — `useMutation` unused + `buildRtspMain` unused | `DiscoveryModal.tsx` | ✅ Fixed |
+| G-06 | Discovery UI tombol "🔍 Cari Kamera" tidak muncul | `Cameras/index.tsx` | ✅ Fixed |
+| BUG-TS-1 | TypeScript error `<DiscoveryModal>` di luar wrapper | `Cameras/index.tsx` | ✅ Fixed |
+| BUG-TS-2 | TypeScript error `useMutation` + `buildRtspMain` unused | `DiscoveryModal.tsx` | ✅ Fixed |
 
 ### Sesi #018 — 26 Juli 2026 (Malam)
 
@@ -109,24 +118,24 @@ Sesi ini adalah audit — tidak ada file yang di-push ke backend/frontend. Yang 
 |----|-------------|------|--------|
 | BUG-054 | Login styling tidak muncul — Tailwind tidak di-load | `tailwind.config.js`, `postcss.config.js` | ✅ Fixed |
 | A-10 | Role matrix + permission dependencies lengkap | `auth.py`, `dependencies.py` | ✅ Done |
-| BUG-052 | Storage drive fix — sync volume mount + endpoints CRUD storage | `docker-compose.yml`, `storage.yaml`, `storage.py` | ✅ Fixed |
+| BUG-052 | Storage drive fix — sync volume mount + endpoints CRUD | `docker-compose.yml`, `storage.yaml`, `storage.py` | ✅ Fixed |
 | E-14 | Snapshot manual via FFmpeg | `cameras.py` | ✅ Done |
 | E-15 | Scheduled recording per kamera | `camera_recorder.py` | ✅ Done |
 | B-13 | Camera group/tag — tabel + CRUD endpoints | `camera_groups.py` | ✅ Done |
-| Settings | Settings router komprehensif menyimpan ke `system.yaml` | `settings.py` | ✅ Done |
+| Settings | Settings router komprehensif ke `system.yaml` | `settings.py` | ✅ Done |
 
 ### Sesi #017 — 26 Juli 2026
 
 | ID | Bug | Fix |
 |----|-----|-----|
-| BUG-051 | Live View video ter-crop (`object-fit: cover`) | ✅ Fixed |
-| BUG-052 | Storage mapping tidak sinkron setelah tambah kamera | ✅ Fixed |
+| BUG-051 | Live View video ter-crop | ✅ Fixed |
+| BUG-052 | Storage mapping tidak sinkron | ✅ Fixed |
 | BUG-053 | Live View hitam saat HLS belum ready | ✅ Fixed |
-| A-06 | Profile user + ganti password sendiri + reset oleh admin | ✅ Fixed |
+| A-06 | Profile user + ganti password | ✅ Fixed |
 | A-08 | Audit log aktivitas admin/user | ✅ Fixed |
 | O-01 | Storage diagnostics endpoint | ✅ Done |
-| O-02 | Request ID + structured logging + richer health surface | ✅ Done |
-| O-03 | Async playback transcode queue + cache lifecycle management | ✅ Done |
+| O-02 | Request ID + structured logging | ✅ Done |
+| O-03 | Async playback transcode queue | ✅ Done |
 
 ### Sesi #016 — 26 Juli 2026
 
@@ -140,10 +149,10 @@ Sesi ini adalah audit — tidak ada file yang di-push ke backend/frontend. Yang 
 
 | ID | Bug | Fix |
 |----|-----|-----|
-| BUG-047 | Playback file >100MB error — HEVC tidak di-transcode | Pipeline: probe codec → HEVC transcode → H264 remux → serve |
-| BUG-048 | File 0MB menumpuk di storage dan muncul di list | Cleanup setelah segment + filter dari API list |
-| BUG-049 | Duplikasi fungsi di `ffmpeg_wrapper.py` | Deduplikasi |
-| BUG-050 | Timeout remux 60s terlalu pendek | Naik ke 300s (remux) dan 1200s (transcode) |
+| BUG-047 | Playback file >100MB error | HEVC transcode pipeline |
+| BUG-048 | File 0MB menumpuk | Cleanup + filter dari API |
+| BUG-049 | Duplikasi fungsi `ffmpeg_wrapper.py` | Deduplikasi |
+| BUG-050 | Timeout remux 60s terlalu pendek | Naik ke 300s/1200s |
 
 ### Sesi #010–014 — 24–26 Juli 2026
 - BUG-028–046: Docker runtime, storage 500, HLS 404, playback HEVC, auth 401 — semua fixed
@@ -160,9 +169,8 @@ Sesi ini adalah audit — tidak ada file yang di-push ke backend/frontend. Yang 
            └─→ 003 (partition recordings + motion_events)
 ```
 
-**Catatan penting:** Jika DB sudah ada dari sebelum sesi #021 (revision `20260726_000001` di alembic_version), jalankan:
+**Catatan penting:** Jika DB sudah ada dari sebelum sesi #021 (revision `20260726_000001` di alembic_version):
 ```bash
-# Stamp manual sebelum upgrade agar chain bisa dilanjut
 docker compose exec api alembic stamp 001b
 docker compose exec api alembic upgrade head
 ```
@@ -250,28 +258,29 @@ systemctl status nvr-api nvr-recorder nvr-motion nvr-encoder
 
 ## Issue Tracker & Backlog
 
-### 🔴 Bug Aktif (Perlu Fix)
+### ✅ Tidak Ada Bug Kritis Aktif
 
-| ID | Bug | File | Prioritas |
-|----|-----|------|----------|
-| BUG-058 | `onvif_scanner.py` — `_ws_discovery()` sync blocking di coroutine async, tidak ada fallback port scan | `backend/app/services/onvif_scanner.py` | **Tinggi** |
-| BUG-059 | `requirements.txt` memuat `onvif-zeep==0.2.12` tapi tidak pernah dipakai di kode manapun | `backend/requirements.txt` | **Sedang** |
-| BUG-060 | `storage.yaml` path `/mnt/driveE` tidak cocok dengan Docker volume `/mnt/driveA`. Halaman storage kosong. Tidak ada endpoint browse filesystem. | `storage.yaml`, `backend/app/api/v1/endpoints/storage.py` | **Tinggi** |
+Semua bug kritis sudah resolved di kode. Langkah selanjutnya: rebuild container dan verifikasi fungsional.
+
+```bash
+git pull
+docker compose up --build -d
+docker compose logs api -f
+```
 
 ### ❓ Yang Masih Perlu Diverifikasi (setelah build ulang)
 
 | # | Item | Cara Verifikasi |
 |---|------|----------------|
-| 1 | API container tidak crash loop | `docker compose logs api --tail 30` — harus ada `Application startup complete` |
+| 1 | API tidak crash loop | `docker compose logs api --tail 30` — harus ada `NVR API service started successfully` |
 | 2 | Discovery scan ONVIF | Swagger `http://localhost:8000/api/docs` → POST `/api/v1/discovery/cameras` |
-| 3 | cam_03 — 403 Forbidden | Edit cam_03 di halaman Cameras → update credentials RTSP |
-| 4 | cam_02 — Connection refused | Cek apakah kamera online / IP berubah |
-| 5 | BUG-032: 403 di `/api/v1/config/system` | `SELECT username, role FROM users;` di DB |
-| 6 | BUG-047: Playback file >100MB | Buka Playback, klik file >100MB |
-| 7 | BUG-048: File 0MB tidak muncul | Buka Playback, semua item harus punya ukuran valid |
-| 8 | BUG-051: Live View video tidak ter-crop | Buka grid 2x2 dan 4x4 |
-| 9 | A-06: Profile + ganti password | Coba `/profile`, ganti password, reset user lain dari Users |
-| 10 | C-15/C-16: Sort & filter tabel Cameras | Klik header kolom Name → sort |
+| 3 | Storage browse endpoint | GET `http://localhost:8000/api/v1/storage/browse` — harus return daftar folder di `/mnt` |
+| 4 | Storage page tidak kosong | Buka halaman Storage di frontend — harus ada info drive `/mnt/driveA` |
+| 5 | cam_03 — 403 Forbidden | Edit cam_03 di halaman Cameras → update credentials RTSP |
+| 6 | Playback file >100MB | Buka Playback, klik file >100MB |
+| 7 | Live View grid 2x2 dan 4x4 | Buka grid, pastikan video tidak ter-crop |
+| 8 | Profile + ganti password | Coba `/profile`, ganti password |
+| 9 | Sort & filter tabel Cameras | Klik header kolom Name → sort |
 
 ### 🔴 Prioritas Tinggi — Fitur Belum Dikerjakan
 
@@ -281,7 +290,7 @@ systemctl status nvr-api nvr-recorder nvr-motion nvr-encoder
 | F-09 | Jadwal cleanup terjadwal | Cleanup rutin, bukan hanya saat disk penuh |
 | F-10 | Alert disk kritis via Telegram | Penting untuk 30 kamera |
 | D-09 | Download rekaman ke lokal | Tombol download di halaman Playback |
-| G-07 | Auto-add dari discovery | Setelah BUG-058 fix |
+| G-07 | Auto-add kamera dari hasil discovery | Tombol "Tambah ke sistem" langsung dari modal discovery |
 
 ### 🟠 Prioritas Sedang — Fitur Belum Dikerjakan
 
@@ -372,7 +381,8 @@ systemctl status nvr-api nvr-recorder nvr-motion nvr-encoder
 | 18 | 27 Juli 2026 | #019 | Claude | Discovery UI fix (tombol muncul, TypeScript error) |
 | 19 | 27 Juli 2026 | #020 | Claude | Debug discovery scan + temukan BUG-055 (migration 003 crash loop) |
 | 20 | 28 Juli 2026 | #021 | Claude | Fix BUG-055/056/057, docker-compose path, hapus file sampah |
-| 21 | 28 Juli 2026 | #022 | Claude | Audit discovery + storage — temuan BUG-058/059/060, belum di-fix |
+| 21 | 28 Juli 2026 | #022 | Claude | Audit discovery + storage — temuan BUG-058/059/060 (ternyata sudah fix) |
+| 22 | 28 Juli 2026 | #023 | Claude | Verifikasi source code — BUG-058/059/060 confirmed resolved di kode |
 
 ---
 

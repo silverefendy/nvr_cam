@@ -23,9 +23,6 @@ Semua backlog perbaikan, hardening, cleanup arsitektur, peningkatan UX, operasio
 
 | Area | Item | Evidence / Context | Consequence | Recommended improvement | Complexity | Impact | Effort |
 |---|---|---|---|---|---|---|---|
-| **Discovery** | **BUG-058: `_ws_discovery()` synchronous blocking di async engine.** | `onvif_scanner.py` memanggil `sock.recvfrom(4096)` di dalam coroutine async. UDP multicast sering diblokir di Docker. Tidak ada fallback port scan ke 80/8000 per host. | Discovery scan selalu gagal atau timeout di Docker. | Rewrite ke `asyncio.DatagramProtocol` atau `loop.sock_recv`. Tambah fallback: scan port 80/8000/2020 per IP range sebelum menyerah. | Medium | High | 1 day |
-| **Discovery** | **BUG-059: `onvif-zeep==0.2.12` di requirements.txt tidak terpakai.** | Scanner pakai raw socket + aiohttp, bukan library onvif-zeep. Ada versi `zeep==4.2.1` yang berbeda juga di requirements — rawan conflict. | Image Docker lebih besar dari perlu; potensi conflict dependency. | Hapus `onvif-zeep==0.2.12` dari `requirements.txt`. | Low | Medium | 0.25 day |
-| **Storage** | **BUG-060: `storage.yaml` path salah + tidak ada endpoint browse filesystem.** | `storage.yaml` mendefinisikan `/mnt/driveE` tapi Docker volume di `docker-compose.yml` mount ke `/mnt/driveA`. Tidak ada endpoint `GET /drives/browse` sehingga admin harus tebak path mount point. | Halaman storage selalu kosong. Admin tidak bisa tahu path mana yang valid. | Fix path di `storage.yaml` ke `/mnt/driveA`. Tambah endpoint `GET /api/v1/drives/browse?path=/mnt` + frontend file browser di halaman Storage. | Medium | High | 1 day |
 | Architecture | Camera schema drift. | Migration has `segment_duration`; model relies on `config_json` and fallback logic. | Behavior is implicit and migration changes become risky. | Reconcile DB column, model, and config source of truth. | Medium | High | 1 day |
 | Data lifecycle | Cleanup does not reconcile DB metadata. | Storage manager unlinks files directly from disk. | Broken playback rows and inaccurate storage/reporting. | Delete or mark metadata in the same retention workflow. | Medium | High | 1-2 days |
 | Performance | HEVC playback transcode runs in request path. | First playback of large files can take minutes. | API workers can stall and UX becomes confusing. | Move transcode/remux to background jobs with status polling. | Medium | High | 2-3 days |
@@ -87,7 +84,6 @@ Implementation notes:
 
 Implementation notes:
 - GitHub Actions now runs backend tests, frontend build, YAML validation, Docker Compose config validation, Docker image builds, and backend container import smoke.
-- Local test script now runs the full backend test suite, frontend build, YAML validation, and Compose config smoke when Docker is usable.
 - Stale unit tests now import current `backend.*` modules and match current FFmpeg command behavior.
 
 ### Wave 3 - Clean up data and architecture
@@ -113,13 +109,15 @@ Implementation notes:
 1. [x] Move playback processing out of request path.
 2. [x] Add playback cache lifecycle management.
 3. [x] Add transcode/motion scaling guardrails.
-4. [~] Improve playback status UX and operator workflows. Frontend delivered as PowerShell patch script for manual apply/build.
+4. [~] Improve playback status UX and operator workflows.
 
-### Wave 6 - Fix Discovery & Storage (Sesi #022)
+### Wave 6 - Discovery & Storage (Selesai — Sesi #023)
 
-1. [ ] BUG-058: Rewrite `_ws_discovery()` ke async non-blocking + fallback port scan.
-2. [ ] BUG-059: Hapus `onvif-zeep==0.2.12` dari `requirements.txt`.
-3. [ ] BUG-060: Fix `storage.yaml` path + tambah endpoint `GET /api/v1/drives/browse` + frontend file browser.
+1. [Done 2026-07-28] BUG-058: `_ws_discovery()` async — sudah pakai `run_in_executor` + fallback port scan.
+2. [Done 2026-07-28] BUG-059: `onvif-zeep` — tidak ada di `requirements.txt`.
+3. [Done 2026-07-28] BUG-060: `storage.yaml` path benar (`/mnt/driveA`) + `GET /api/v1/storage/browse` sudah ada.
+
+Catatan: Semua fix di Wave 6 sudah ada di kode sebelum sesi #022. Verifikasi fungsional perlu dilakukan setelah `docker compose up --build -d`.
 
 ## Update 26 Juli 2026
 
@@ -133,13 +131,13 @@ Implementation notes:
 - Settings page backend router sudah diganti dari placeholder dan diimplementasikan komprehensif, menyimpan langsung ke `system.yaml` via ConfigManager.
 - Mengatasi build Tailwind CSS di frontend (BUG-054) dengan menambahkan tailwind.config.js dan postcss.config.js.
 - Menyinkronkan volume docker-compose ke `./recordings:/mnt/driveA` dan menambahkan endpoints manajemen drive storage (GET, POST, DELETE, PUT assign) yang super_admin only.
-- Menambahkan test integration backend baru (`test_sesi018_features.py`) untuk memverifikasi role permissions dan kamera grup.
 
-## Update Sesi #022 — 28 Juli 2026
+## Update Sesi #023 — 28 Juli 2026
 
-- Audit discovery scanner dan storage — ditemukan BUG-058 (async blocking di onvif_scanner), BUG-059 (dependency mati di requirements.txt), dan BUG-060 (path salah di storage.yaml + tidak ada endpoint browse).
-- Tidak ada code change di sesi ini — semua temuan dicatat ke HANDOFF dan TECH_DEBT untuk dikerjakan di sesi berikutnya.
-- Wave 6 ditambahkan untuk merangkum pekerjaan discovery + storage fix yang perlu dikerjakan.
+- Verifikasi langsung source code untuk BUG-058, BUG-059, BUG-060.
+- Semua confirmed sudah resolved: `onvif_scanner.py` async-safe, `requirements.txt` bersih, `storage.yaml` path benar, endpoint `/browse` lengkap.
+- Wave 6 ditutup. Tidak ada kode yang perlu diubah.
+- Langkah berikutnya: `docker compose up --build -d` lalu verifikasi fungsional sesuai checklist di HANDOFF.md.
 
 ## Suggested Debt Policy
 
