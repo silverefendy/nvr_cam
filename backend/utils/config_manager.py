@@ -258,3 +258,30 @@ class ConfigManager:
 
 # Global instance
 config_manager = ConfigManager()
+
+
+async def load_db_settings_into_config() -> None:
+    """Load settings dari DB (tabel app_settings) ke in-memory config.
+
+    Dipanggil saat startup oleh app.py setelah DB siap.
+    Saat ini cukup no-op karena settings sudah dibaca dari .env via pydantic-settings.
+    Fungsi ini bisa diperluas nanti untuk override settings dari DB jika dibutuhkan.
+    """
+    try:
+        from backend.db.base import AsyncSessionLocal
+        from backend.db.models.app_setting import AppSetting
+        from sqlalchemy import select
+        import json
+
+        async with AsyncSessionLocal() as db:
+            res = await db.execute(select(AppSetting))
+            rows = res.scalars().all()
+            # Reserved untuk future use: merge DB settings ke in-memory config
+            _ = {row.key: json.loads(row.value) for row in rows if row.value}
+
+    except Exception as e:
+        # Jangan crash startup jika DB belum siap — settings dari .env tetap dipakai
+        import logging
+        logging.getLogger(__name__).warning(
+            f"load_db_settings_into_config: could not load from DB, using .env defaults: {e}"
+        )
