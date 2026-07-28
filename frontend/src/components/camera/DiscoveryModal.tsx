@@ -23,6 +23,23 @@ const METHOD_INFO: Record<ScanMethod, { label: string; desc: string; icon: strin
   },
 }
 
+// Tipe eksplisit untuk field form — hindari as const agar tidak ada union type error
+interface FormField {
+  label: string
+  field: string
+  placeholder: string
+  width: number
+  type?: string
+}
+
+const FORM_FIELDS: FormField[] = [
+  { label: 'Camera ID *', field: 'id',       placeholder: 'cam_01',         width: 110 },
+  { label: 'Nama *',      field: 'name',     placeholder: 'Nama kamera',    width: 160 },
+  { label: 'Lokasi',      field: 'location', placeholder: 'cth: Pintu Masuk', width: 140 },
+  { label: 'Username',    field: 'username', placeholder: 'admin',           width: 100 },
+  { label: 'Password',    field: 'password', placeholder: '••••••',          width: 100, type: 'password' },
+]
+
 // Error boundary untuk cegah layar putih
 class DiscoveryErrorBoundary extends Component<
   { children: ReactNode; onClose: () => void },
@@ -76,8 +93,8 @@ function DiscoveryModalInner({ storageDrives, onClose }: Props) {
   const [isScanning, setIsScanning] = useState(false)
   const [networkScanned, setNetworkScanned] = useState('')
 
-  const [adding, setAdding]   = useState<Record<string, boolean>>({})
-  const [added, setAdded]     = useState<Record<string, boolean>>({})
+  const [adding, setAdding]     = useState<Record<string, boolean>>({})
+  const [added, setAdded]       = useState<Record<string, boolean>>({})
   const [addError, setAddError] = useState<Record<string, string>>({})
 
   const [formData, setFormData] = useState<Record<string, {
@@ -151,7 +168,6 @@ function DiscoveryModalInner({ storageDrives, onClose }: Props) {
     const f = formData[key]
     if (!f) return
 
-    // Validasi ID — harus diawali cam_
     const rawId = f.id.trim().toLowerCase()
     if (!rawId) { setAddError(p => ({ ...p, [key]: 'Camera ID wajib diisi. Contoh: cam_01' })); return }
     if (!rawId.startsWith('cam_')) { setAddError(p => ({ ...p, [key]: 'Camera ID harus diawali "cam_" (contoh: cam_01, cam_pintu)' })); return }
@@ -162,7 +178,6 @@ function DiscoveryModalInner({ storageDrives, onClose }: Props) {
     setAddError(p => ({ ...p, [key]: '' }))
 
     try {
-      // Bangun RTSP URL dengan kredensial yang diisi user
       const buildRtsp = (template: string) =>
         template.replace(/rtsp:\/\/[^@]*@/, `rtsp://${f.username}:${f.password}@`)
 
@@ -174,32 +189,28 @@ function DiscoveryModalInner({ storageDrives, onClose }: Props) {
         ? buildRtsp(cam.suggested_rtsp_sub)
         : `rtsp://${f.username}:${f.password}@${cam.ip}:554/cam/realmonitor?channel=1&subtype=1`
 
-      // Payload sesuai CameraConfigCreate schema di backend
-      const payload = {
-        id:               rawId,           // sudah lowercase, diawali cam_
-        name:             f.name.trim(),
-        location:         f.location.trim() || null,
-        ip_address:       cam.ip,
-        port:             cam.port === 37777 ? 554 : cam.port,  // gunakan port RTSP, bukan SDK port
-        username:         f.username,
-        password:         f.password,
-        channel:          1,
+      await apiClient.post('/config/cameras', {
+        id:             rawId,
+        name:           f.name.trim(),
+        location:       f.location.trim() || null,
+        ip_address:     cam.ip,
+        port:           cam.port === 37777 ? 554 : cam.port,
+        username:       f.username,
+        password:       f.password,
+        channel:        1,
         rtsp_main_custom,
         rtsp_sub_custom,
-        storage_drive:    f.storage_drive,
-        motion_enabled:   false,
-        retention_days:   f.retention_days,
-      }
+        storage_drive:  f.storage_drive,
+        motion_enabled: false,
+        retention_days: f.retention_days,
+      })
 
-      await apiClient.post('/config/cameras', payload)
       setAdded(p => ({ ...p, [key]: true }))
       queryClient.invalidateQueries({ queryKey: ['cameras-list'] })
     } catch (err: any) {
-      // Tangkap error 422 dengan detail dari backend
       const detail = err?.response?.data?.detail
       let msg = 'Gagal menambahkan kamera.'
       if (Array.isArray(detail)) {
-        // FastAPI validation error — array of {loc, msg, type}
         msg = detail.map((e: any) => `${e.loc?.slice(-1)[0] || ''}: ${e.msg}`).join('; ')
       } else if (typeof detail === 'string') {
         msg = detail
@@ -230,9 +241,7 @@ function DiscoveryModalInner({ storageDrives, onClose }: Props) {
         }}>
           <div>
             <div style={{ color: '#fff', fontWeight: 600, fontSize: 15 }}>🔍 Cari Kamera Otomatis</div>
-            <div style={{ color: '#64748b', fontSize: 12, marginTop: 2 }}>
-              Scan jaringan — ONVIF WS-Discovery atau IP Range Scan
-            </div>
+            <div style={{ color: '#64748b', fontSize: 12, marginTop: 2 }}>Scan jaringan — ONVIF WS-Discovery atau IP Range Scan</div>
           </div>
           <button onClick={onClose} style={{
             background: 'none', border: 'none', color: '#64748b',
@@ -241,10 +250,7 @@ function DiscoveryModalInner({ storageDrives, onClose }: Props) {
         </div>
 
         {/* Method Selector */}
-        <div style={{
-          padding: '12px 20px', borderBottom: '1px solid #2d3a50',
-          display: 'flex', gap: 10, flexShrink: 0,
-        }}>
+        <div style={{ padding: '12px 20px', borderBottom: '1px solid #2d3a50', display: 'flex', gap: 10, flexShrink: 0 }}>
           {(Object.keys(METHOD_INFO) as ScanMethod[]).map(m => {
             const info = METHOD_INFO[m]
             const active = method === m
@@ -258,40 +264,26 @@ function DiscoveryModalInner({ storageDrives, onClose }: Props) {
                 <div style={{ color: active ? '#60a5fa' : '#94a3b8', fontSize: 13, fontWeight: 600 }}>
                   {info.icon} {info.label}
                   {m === 'rtsp_scan' && (
-                    <span style={{
-                      marginLeft: 6, fontSize: 10, background: '#166534',
-                      color: '#4ade80', padding: '1px 6px', borderRadius: 4,
-                    }}>Rekomendasi</span>
+                    <span style={{ marginLeft: 6, fontSize: 10, background: '#166534', color: '#4ade80', padding: '1px 6px', borderRadius: 4 }}>Rekomendasi</span>
                   )}
                 </div>
-                <div style={{ color: '#475569', fontSize: 11, marginTop: 3, lineHeight: 1.4 }}>
-                  {info.desc}
-                </div>
+                <div style={{ color: '#475569', fontSize: 11, marginTop: 3, lineHeight: 1.4 }}>{info.desc}</div>
               </button>
             )
           })}
         </div>
 
         {/* Scan Controls */}
-        <div style={{
-          padding: '12px 20px', borderBottom: '1px solid #2d3a50',
-          display: 'flex', gap: 10, alignItems: 'flex-end', flexShrink: 0, flexWrap: 'wrap',
-        }}>
+        <div style={{ padding: '12px 20px', borderBottom: '1px solid #2d3a50', display: 'flex', gap: 10, alignItems: 'flex-end', flexShrink: 0, flexWrap: 'wrap' }}>
           <div style={{ flex: 1, minWidth: 200 }}>
-            <label style={{ color: '#94a3b8', fontSize: 11, display: 'block', marginBottom: 4 }}>
-              Network CIDR
-            </label>
+            <label style={{ color: '#94a3b8', fontSize: 11, display: 'block', marginBottom: 4 }}>Network CIDR</label>
             <input
               type="text"
               placeholder={method === 'rtsp_scan' ? 'cth: 10.1.0.0/24 atau 192.168.1.0/24' : 'cth: 192.168.1.0/24 (opsional)'}
               value={network}
               onChange={e => setNetwork(e.target.value)}
               disabled={isScanning}
-              style={{
-                width: '100%', background: '#0f1117', border: '1px solid #2d3a50',
-                borderRadius: 6, padding: '6px 10px', color: '#e2e8f0', fontSize: 13,
-                outline: 'none', boxSizing: 'border-box',
-              }}
+              style={{ width: '100%', background: '#0f1117', border: '1px solid #2d3a50', borderRadius: 6, padding: '6px 10px', color: '#e2e8f0', fontSize: 13, outline: 'none', boxSizing: 'border-box' }}
             />
           </div>
           <div style={{ minWidth: 110 }}>
@@ -301,22 +293,12 @@ function DiscoveryModalInner({ storageDrives, onClose }: Props) {
               value={timeout}
               onChange={e => setTimeout_(Number(e.target.value))}
               disabled={isScanning}
-              style={{
-                width: '100%', background: '#0f1117', border: '1px solid #2d3a50',
-                borderRadius: 6, padding: '6px 10px', color: '#e2e8f0', fontSize: 13,
-                outline: 'none', boxSizing: 'border-box',
-              }}
+              style={{ width: '100%', background: '#0f1117', border: '1px solid #2d3a50', borderRadius: 6, padding: '6px 10px', color: '#e2e8f0', fontSize: 13, outline: 'none', boxSizing: 'border-box' }}
             />
           </div>
           {!isScanning
-            ? <button onClick={handleScan} style={{
-                padding: '7px 22px', background: '#2563eb', color: '#fff',
-                border: 'none', borderRadius: 6, fontSize: 13, cursor: 'pointer', fontWeight: 500,
-              }}>Mulai Scan</button>
-            : <button onClick={handleStop} style={{
-                padding: '7px 22px', background: '#dc2626', color: '#fff',
-                border: 'none', borderRadius: 6, fontSize: 13, cursor: 'pointer', fontWeight: 500,
-              }}>Stop</button>
+            ? <button onClick={handleScan} style={{ padding: '7px 22px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: 6, fontSize: 13, cursor: 'pointer', fontWeight: 500 }}>Mulai Scan</button>
+            : <button onClick={handleStop} style={{ padding: '7px 22px', background: '#dc2626', color: '#fff', border: 'none', borderRadius: 6, fontSize: 13, cursor: 'pointer', fontWeight: 500 }}>Stop</button>
           }
         </div>
 
@@ -326,22 +308,15 @@ function DiscoveryModalInner({ storageDrives, onClose }: Props) {
             <div style={{ textAlign: 'center', color: '#60a5fa', padding: '32px 0' }}>
               <div style={{ fontSize: 28, marginBottom: 8 }}>{method === 'rtsp_scan' ? '🔎' : '📡'}</div>
               <div style={{ fontSize: 13 }}>{method === 'rtsp_scan' ? 'Memindai IP satu per satu…' : 'Mengirim broadcast ONVIF…'}</div>
-              <div style={{ fontSize: 11, color: '#475569', marginTop: 4 }}>
-                {network || 'auto-detect subnet'} • timeout {timeout}s
-              </div>
+              <div style={{ fontSize: 11, color: '#475569', marginTop: 4 }}>{network || 'auto-detect subnet'} • timeout {timeout}s</div>
             </div>
           )}
 
           {!isScanning && scanError && (
-            <div style={{
-              background: '#2d1515', border: '1px solid #7f1d1d',
-              borderRadius: 6, padding: '10px 14px', color: '#fca5a5', fontSize: 13,
-            }}>
+            <div style={{ background: '#2d1515', border: '1px solid #7f1d1d', borderRadius: 6, padding: '10px 14px', color: '#fca5a5', fontSize: 13 }}>
               ⚠️ {scanError}
               {method === 'onvif' && (
-                <div style={{ marginTop: 8, color: '#94a3b8', fontSize: 12 }}>
-                  💡 Coba ganti ke <strong style={{ color: '#60a5fa' }}>IP Range Scan</strong>.
-                </div>
+                <div style={{ marginTop: 8, color: '#94a3b8', fontSize: 12 }}>💡 Coba ganti ke <strong style={{ color: '#60a5fa' }}>IP Range Scan</strong>.</div>
               )}
             </div>
           )}
@@ -361,41 +336,24 @@ function DiscoveryModalInner({ storageDrives, onClose }: Props) {
                 const showForm = !!form && !isAdded
 
                 return (
-                  <div key={key} style={{
-                    background: '#0f1117',
-                    border: `1px solid ${isAdded ? '#166534' : '#2d3a50'}`,
-                    borderRadius: 8, padding: '12px 16px',
-                  }}>
+                  <div key={key} style={{ background: '#0f1117', border: `1px solid ${isAdded ? '#166534' : '#2d3a50'}`, borderRadius: 8, padding: '12px 16px' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 8 }}>
                       <div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                          <span style={{ color: '#e2e8f0', fontWeight: 500, fontSize: 13 }}>
-                            {cam.manufacturer || 'Unknown'} {cam.model || ''}
-                          </span>
-                          {cam.dahua_sdk && (
-                            <span style={{ fontSize: 10, background: '#1e3a5f', color: '#60a5fa', padding: '1px 6px', borderRadius: 4 }}>Dahua SDK</span>
-                          )}
-                          <span style={{ fontSize: 10, background: '#1a2a1a', color: '#4ade80', padding: '1px 6px', borderRadius: 4 }}>
-                            {cam.method || 'onvif'}
-                          </span>
+                          <span style={{ color: '#e2e8f0', fontWeight: 500, fontSize: 13 }}>{cam.manufacturer || 'Unknown'} {cam.model || ''}</span>
+                          {cam.dahua_sdk && <span style={{ fontSize: 10, background: '#1e3a5f', color: '#60a5fa', padding: '1px 6px', borderRadius: 4 }}>Dahua SDK</span>}
+                          <span style={{ fontSize: 10, background: '#1a2a1a', color: '#4ade80', padding: '1px 6px', borderRadius: 4 }}>{cam.method || 'onvif'}</span>
                         </div>
-                        <div style={{ color: '#60a5fa', fontSize: 12, fontFamily: 'monospace', marginTop: 2 }}>
-                          {cam.ip}:{cam.port}
-                        </div>
+                        <div style={{ color: '#60a5fa', fontSize: 12, fontFamily: 'monospace', marginTop: 2 }}>{cam.ip}:{cam.port}</div>
                         {(cam.suggested_rtsp_main || cam.rtsp_url) && (
-                          <div style={{ color: '#475569', fontSize: 11, marginTop: 1, fontFamily: 'monospace' }}>
-                            RTSP: {cam.suggested_rtsp_main || cam.rtsp_url}
-                          </div>
+                          <div style={{ color: '#475569', fontSize: 11, marginTop: 1, fontFamily: 'monospace' }}>RTSP: {cam.suggested_rtsp_main || cam.rtsp_url}</div>
                         )}
                       </div>
                       <div style={{ flexShrink: 0 }}>
                         {isAdded
                           ? <span style={{ color: '#22c55e', fontSize: 12, padding: '4px 10px' }}>✓ Ditambahkan</span>
                           : !form
-                            ? <button onClick={() => initForm(cam)} style={{
-                                padding: '5px 14px', background: '#1d4ed8', color: '#fff',
-                                border: 'none', borderRadius: 5, fontSize: 12, cursor: 'pointer',
-                              }}>+ Tambah</button>
+                            ? <button onClick={() => initForm(cam)} style={{ padding: '5px 14px', background: '#1d4ed8', color: '#fff', border: 'none', borderRadius: 5, fontSize: 12, cursor: 'pointer' }}>+ Tambah</button>
                             : null
                         }
                       </div>
@@ -403,58 +361,35 @@ function DiscoveryModalInner({ storageDrives, onClose }: Props) {
 
                     {showForm && (
                       <div style={{ marginTop: 12, borderTop: '1px solid #2d3a50', paddingTop: 12 }}>
-                        {/* Hint Camera ID */}
                         <div style={{ color: '#f59e0b', fontSize: 10, marginBottom: 8 }}>
                           ⚠ Camera ID harus diawali <code style={{ color: '#4ade80' }}>cam_</code> — contoh: <code style={{ color: '#4ade80' }}>cam_01</code>, <code style={{ color: '#4ade80' }}>cam_pintu</code>
                         </div>
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                          {([
-                            { label: 'Camera ID *', field: 'id', placeholder: 'cam_01', width: 110 },
-                            { label: 'Nama *', field: 'name', placeholder: 'Nama kamera', width: 160 },
-                            { label: 'Lokasi', field: 'location', placeholder: 'cth: Pintu Masuk', width: 140 },
-                            { label: 'Username', field: 'username', placeholder: 'admin', width: 100 },
-                            { label: 'Password', field: 'password', placeholder: '••••••', width: 100, type: 'password' },
-                          ] as const).map(({ label, field, placeholder, width, type }) => (
+                          {FORM_FIELDS.map(({ label, field, placeholder, width, type }) => (
                             <div key={field} style={{ minWidth: width }}>
                               <label style={{ color: '#94a3b8', fontSize: 10, display: 'block', marginBottom: 3 }}>{label}</label>
                               <input
-                                type={(type as string) || 'text'}
+                                type={type || 'text'}
                                 placeholder={placeholder}
                                 value={(form as any)[field]}
                                 onChange={e => updateForm(key, field, e.target.value)}
-                                style={{
-                                  width: '100%', background: '#1e2535', border: '1px solid #334155',
-                                  borderRadius: 5, padding: '5px 8px', color: '#e2e8f0', fontSize: 12,
-                                  outline: 'none', boxSizing: 'border-box',
-                                }}
+                                style={{ width: '100%', background: '#1e2535', border: '1px solid #334155', borderRadius: 5, padding: '5px 8px', color: '#e2e8f0', fontSize: 12, outline: 'none', boxSizing: 'border-box' }}
                               />
                             </div>
                           ))}
                           <div style={{ minWidth: 120 }}>
                             <label style={{ color: '#94a3b8', fontSize: 10, display: 'block', marginBottom: 3 }}>Storage</label>
-                            <select
-                              value={form.storage_drive}
-                              onChange={e => updateForm(key, 'storage_drive', e.target.value)}
-                              style={{
-                                width: '100%', background: '#1e2535', border: '1px solid #334155',
-                                borderRadius: 5, padding: '5px 8px', color: '#e2e8f0', fontSize: 12,
-                                outline: 'none', boxSizing: 'border-box',
-                              }}
+                            <select value={form.storage_drive} onChange={e => updateForm(key, 'storage_drive', e.target.value)}
+                              style={{ width: '100%', background: '#1e2535', border: '1px solid #334155', borderRadius: 5, padding: '5px 8px', color: '#e2e8f0', fontSize: 12, outline: 'none', boxSizing: 'border-box' }}
                             >
                               {storageDrives.map(d => <option key={d} value={d}>{d}</option>)}
                             </select>
                           </div>
                           <div style={{ minWidth: 80 }}>
                             <label style={{ color: '#94a3b8', fontSize: 10, display: 'block', marginBottom: 3 }}>Retensi (hari)</label>
-                            <input
-                              type="number" min={1} max={365}
-                              value={form.retention_days}
+                            <input type="number" min={1} max={365} value={form.retention_days}
                               onChange={e => updateForm(key, 'retention_days', Number(e.target.value))}
-                              style={{
-                                width: '100%', background: '#1e2535', border: '1px solid #334155',
-                                borderRadius: 5, padding: '5px 8px', color: '#e2e8f0', fontSize: 12,
-                                outline: 'none', boxSizing: 'border-box',
-                              }}
+                              style={{ width: '100%', background: '#1e2535', border: '1px solid #334155', borderRadius: 5, padding: '5px 8px', color: '#e2e8f0', fontSize: 12, outline: 'none', boxSizing: 'border-box' }}
                             />
                           </div>
                         </div>
@@ -462,45 +397,25 @@ function DiscoveryModalInner({ storageDrives, onClose }: Props) {
                         {(cam.suggested_rtsp_main || cam.rtsp_url) && (
                           <div style={{ marginTop: 8 }}>
                             <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
-                              <input
-                                type="checkbox"
-                                checked={form.use_suggested_rtsp}
-                                onChange={e => updateForm(key, 'use_suggested_rtsp', e.target.checked)}
-                              />
+                              <input type="checkbox" checked={form.use_suggested_rtsp} onChange={e => updateForm(key, 'use_suggested_rtsp', e.target.checked)} />
                               <span style={{ color: '#94a3b8', fontSize: 11 }}>
                                 Gunakan RTSP URL format Dahua
-                                <span style={{ color: '#475569', marginLeft: 4, fontFamily: 'monospace', fontSize: 10 }}>
-                                  {cam.suggested_rtsp_main || cam.rtsp_url}
-                                </span>
+                                <span style={{ color: '#475569', marginLeft: 4, fontFamily: 'monospace', fontSize: 10 }}>{cam.suggested_rtsp_main || cam.rtsp_url}</span>
                               </span>
                             </label>
                           </div>
                         )}
 
                         {err && (
-                          <div style={{
-                            color: '#f87171', fontSize: 11, marginTop: 6,
-                            background: '#2d1515', borderRadius: 4, padding: '6px 10px',
-                          }}>⚠️ {err}</div>
+                          <div style={{ color: '#f87171', fontSize: 11, marginTop: 6, background: '#2d1515', borderRadius: 4, padding: '6px 10px' }}>⚠️ {err}</div>
                         )}
 
                         <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
-                          <button
-                            onClick={() => handleAddCamera(cam)}
-                            disabled={isAdding}
-                            style={{
-                              padding: '5px 16px',
-                              background: isAdding ? '#1e3a5f' : '#2563eb',
-                              color: '#fff', border: 'none', borderRadius: 5, fontSize: 12,
-                              cursor: isAdding ? 'not-allowed' : 'pointer',
-                            }}
+                          <button onClick={() => handleAddCamera(cam)} disabled={isAdding}
+                            style={{ padding: '5px 16px', background: isAdding ? '#1e3a5f' : '#2563eb', color: '#fff', border: 'none', borderRadius: 5, fontSize: 12, cursor: isAdding ? 'not-allowed' : 'pointer' }}
                           >{isAdding ? 'Menyimpan…' : 'Simpan Kamera'}</button>
-                          <button
-                            onClick={() => setFormData(p => { const n = { ...p }; delete n[key]; return n })}
-                            style={{
-                              padding: '5px 12px', background: 'none', color: '#64748b',
-                              border: '1px solid #334155', borderRadius: 5, fontSize: 12, cursor: 'pointer',
-                            }}
+                          <button onClick={() => setFormData(p => { const n = { ...p }; delete n[key]; return n })}
+                            style={{ padding: '5px 12px', background: 'none', color: '#64748b', border: '1px solid #334155', borderRadius: 5, fontSize: 12, cursor: 'pointer' }}
                           >Batal</button>
                         </div>
                       </div>
@@ -516,25 +431,16 @@ function DiscoveryModalInner({ storageDrives, onClose }: Props) {
               <div style={{ marginBottom: 8, fontSize: 22 }}>🔎</div>
               Pilih metode scan, isi Network CIDR, lalu klik <strong style={{ color: '#94a3b8' }}>Mulai Scan</strong>.
               <div style={{ marginTop: 10, fontSize: 11, color: '#334155' }}>
-                Docker/Windows → <strong style={{ color: '#60a5fa' }}>IP Range Scan</strong> + subnet kamera
-                (cth: <code style={{ color: '#4ade80' }}>10.1.0.0/24</code>)
+                Docker/Windows → <strong style={{ color: '#60a5fa' }}>IP Range Scan</strong> + subnet kamera (cth: <code style={{ color: '#4ade80' }}>10.1.0.0/24</code>)
               </div>
             </div>
           )}
         </div>
 
         {/* Footer */}
-        <div style={{
-          padding: '12px 20px', borderTop: '1px solid #2d3a50',
-          display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0,
-        }}>
-          <div style={{ fontSize: 11, color: '#334155' }}>
-            💡 Camera ID wajib diawali <code style={{ color: '#4ade80' }}>cam_</code> (contoh: cam_01)
-          </div>
-          <button onClick={onClose} style={{
-            padding: '6px 18px', background: '#1e2535', color: '#94a3b8',
-            border: '1px solid #334155', borderRadius: 6, fontSize: 13, cursor: 'pointer',
-          }}>Tutup</button>
+        <div style={{ padding: '12px 20px', borderTop: '1px solid #2d3a50', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
+          <div style={{ fontSize: 11, color: '#334155' }}>💡 Camera ID wajib diawali <code style={{ color: '#4ade80' }}>cam_</code> (contoh: cam_01)</div>
+          <button onClick={onClose} style={{ padding: '6px 18px', background: '#1e2535', color: '#94a3b8', border: '1px solid #334155', borderRadius: 6, fontSize: 13, cursor: 'pointer' }}>Tutup</button>
         </div>
       </div>
     </div>
