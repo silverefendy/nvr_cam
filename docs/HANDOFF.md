@@ -1,8 +1,8 @@
 # HANDOFF — nvr_cam
 ## Status Proyek + Issue Tracker (Dokumen Tunggal untuk Claude Baru)
 
-**Terakhir diperbarui:** 28 Juli 2026 (Sesi #023)
-**Sesi Terakhir:** #023 (Verifikasi kode BUG-058/059/060 — semua sudah resolved di kode)
+**Terakhir diperbarui:** 29 Juli 2026 (Sesi #024)
+**Sesi Terakhir:** #024 (Fix TypeScript build error TS2339 di `DiscoveryModal.tsx`)
 **Repo:** https://github.com/silverefendy/nvr_cam
 
 ---
@@ -13,12 +13,12 @@
 Repo nvr_cam: https://github.com/silverefendy/nvr_cam
 Akses via MCP GitHub. Baca file ini sebelum mulai: docs/HANDOFF.md
 
-Progress per 28 Juli 2026 (Sesi #023 selesai):
+Progress per 29 Juli 2026 (Sesi #024 selesai):
 - Backend:     🟡 Perlu build ulang + verifikasi (setelah fix sesi #021)
-- Frontend:    ✅ SELESAI (npm run build SUCCESS, Tailwind fix sudah include)
+- Frontend:    🟡 TypeScript error TS2339 sudah di-fix lokal — perlu build ulang
 - Flutter:     🟡 Code ada, flutter analyze belum diverifikasi
 - Deploy:      ✅ scripts/install.sh siap untuk native Ubuntu
-- Docker mode: 🟡 Build errors sudah di-fix — perlu build ulang dan verifikasi
+- Docker mode: 🟡 Perlu build ulang: docker compose build --no-cache frontend
 - Live View:   ✅ Grid selector, fullscreen, PiP, toggle stream, drag-drop, filter, floating mode, sort filter
 - Playback:    ✅ Auth token fix, HEVC transcode, file >100MB bisa diputar, file 0MB tidak muncul
 - Cameras:     ✅ Sort per kolom, filter search + dropdown status
@@ -45,16 +45,41 @@ Dokumen penting:
 | Layer | Status | Catatan |
 |-------|--------|----------|
 | Backend | 🟡 **Perlu Verifikasi** | Build errors sudah di-fix — jalankan `docker compose up --build` |
-| Frontend | ✅ **SELESAI** | `npm run build` SUCCESS |
+| Frontend | 🟡 **Perlu Build Ulang** | TS2339 fix sudah di-patch lokal — jalankan `docker compose build --no-cache frontend` |
 | Mobile Flutter | 🟡 **Code Ada** | `flutter analyze` belum diverifikasi |
 | Deploy Scripts | ✅ **SIAP** | `scripts/install.sh` untuk native Ubuntu |
-| Docker Dev Mode | 🟡 **Perlu Build Ulang** | Jalankan `docker compose up --build -d` setelah pull latest |
+| Docker Dev Mode | 🟡 **Perlu Build Ulang** | Jalankan `docker compose build --no-cache && docker compose up -d` |
 | Discovery | 🟡 **Kode Sudah Fix** | `onvif_scanner.py` sudah async-safe + fallback port scan — perlu build ulang untuk test |
 | Storage | 🟡 **Kode Sudah Fix** | `storage.yaml` path benar, `/browse` endpoint ada — perlu build ulang untuk test |
 
 ---
 
 ## Yang Selesai per Sesi
+
+### Sesi #024 — 29 Juli 2026 (Fix TypeScript build error)
+
+**Masalah:** Docker build frontend gagal dengan error:
+```
+src/components/camera/DiscoveryModal.tsx(417,80): error TS2339: Property 'type' does not exist on type '...'
+```
+
+**Root cause:** File lokal `DiscoveryModal.tsx` berbeda dengan versi di GitHub. Di lokal, array field form ditulis inline dengan `] as const` langsung di dalam JSX. TypeScript `as const` membuat setiap object jadi literal type yang exact — object yang tidak punya property `type` dianggap tidak memiliki property itu sama sekali, sehingga destructuring `{ type }` di `.map()` gagal.
+
+**Fix:** Tambahkan `type: 'text'` ke semua object yang tidak punya property `type`, sehingga union type konsisten.
+
+| ID | Item | File | Status |
+|----|------|------|--------|
+| BUG-061 | TS2339: `Property 'type' does not exist` di `DiscoveryModal.tsx` baris 417 | `frontend/src/components/camera/DiscoveryModal.tsx` | ✅ Fixed — patch lokal via Python script |
+
+**Perintah build setelah fix:**
+```powershell
+docker compose build --no-cache frontend
+docker compose up -d
+```
+
+**Catatan penting:** File di GitHub (`d98c358`) sudah menggunakan `interface FormField` + `const FORM_FIELDS: FormField[]` yang benar. File lokal developer masih pakai versi lama dengan inline `as const`. Setelah build berhasil, pastikan push perubahan lokal ke GitHub agar konsisten.
+
+---
 
 ### Sesi #023 — 28 Juli 2026 (Verifikasi kode)
 
@@ -262,9 +287,10 @@ systemctl status nvr-api nvr-recorder nvr-motion nvr-encoder
 
 Semua bug kritis sudah resolved di kode. Langkah selanjutnya: rebuild container dan verifikasi fungsional.
 
-```bash
-git pull
-docker compose up --build -d
+```powershell
+# Windows (PowerShell)
+docker compose build --no-cache
+docker compose up -d
 docker compose logs api -f
 ```
 
@@ -273,14 +299,15 @@ docker compose logs api -f
 | # | Item | Cara Verifikasi |
 |---|------|----------------|
 | 1 | API tidak crash loop | `docker compose logs api --tail 30` — harus ada `NVR API service started successfully` |
-| 2 | Discovery scan ONVIF | Swagger `http://localhost:8000/api/docs` → POST `/api/v1/discovery/cameras` |
-| 3 | Storage browse endpoint | GET `http://localhost:8000/api/v1/storage/browse` — harus return daftar folder di `/mnt` |
-| 4 | Storage page tidak kosong | Buka halaman Storage di frontend — harus ada info drive `/mnt/driveA` |
-| 5 | cam_03 — 403 Forbidden | Edit cam_03 di halaman Cameras → update credentials RTSP |
-| 6 | Playback file >100MB | Buka Playback, klik file >100MB |
-| 7 | Live View grid 2x2 dan 4x4 | Buka grid, pastikan video tidak ter-crop |
-| 8 | Profile + ganti password | Coba `/profile`, ganti password |
-| 9 | Sort & filter tabel Cameras | Klik header kolom Name → sort |
+| 2 | Frontend build berhasil | `docker compose build --no-cache frontend` — harus exit 0 |
+| 3 | Discovery scan ONVIF | Swagger `http://localhost:8000/api/docs` → POST `/api/v1/discovery/cameras` |
+| 4 | Storage browse endpoint | GET `http://localhost:8000/api/v1/storage/browse` — harus return daftar folder di `/mnt` |
+| 5 | Storage page tidak kosong | Buka halaman Storage di frontend — harus ada info drive `/mnt/driveA` |
+| 6 | cam_03 — 403 Forbidden | Edit cam_03 di halaman Cameras → update credentials RTSP |
+| 7 | Playback file >100MB | Buka Playback, klik file >100MB |
+| 8 | Live View grid 2x2 dan 4x4 | Buka grid, pastikan video tidak ter-crop |
+| 9 | Profile + ganti password | Coba `/profile`, ganti password |
+| 10 | Sort & filter tabel Cameras | Klik header kolom Name → sort |
 
 ### 🔴 Prioritas Tinggi — Fitur Belum Dikerjakan
 
@@ -383,6 +410,7 @@ docker compose logs api -f
 | 20 | 28 Juli 2026 | #021 | Claude | Fix BUG-055/056/057, docker-compose path, hapus file sampah |
 | 21 | 28 Juli 2026 | #022 | Claude | Audit discovery + storage — temuan BUG-058/059/060 (ternyata sudah fix) |
 | 22 | 28 Juli 2026 | #023 | Claude | Verifikasi source code — BUG-058/059/060 confirmed resolved di kode |
+| 23 | 29 Juli 2026 | #024 | Claude | Fix BUG-061 — TS2339 `Property 'type' does not exist` di `DiscoveryModal.tsx` (patch lokal) |
 
 ---
 
